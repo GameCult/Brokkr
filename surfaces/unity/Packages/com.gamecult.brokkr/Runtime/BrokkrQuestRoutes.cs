@@ -24,7 +24,7 @@ namespace GameCult.Brokkr
     [Serializable]
     public sealed class BrokkrUnityWarpedVideoFrame
     {
-        [Key(0)] public string schema = "gamecult.brokkr.unity_warped_video_frame.v0";
+        [Key(0)] public string schema = "brokkr.unity.warped_video_frame.v0";
         [Key(1)] public string frameId = "";
         [Key(2)] public string sourceId = "brokkr.unity_editor:playmode-warped-frame";
         [Key(3)] public string targetStreamId = "";
