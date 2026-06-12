@@ -162,7 +162,7 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "eve.tui.publish",
                     "quest.input.consume",
                     "quest.pose.consume",
-                    "quest.video.publish",
+                    "quest.video_input.publish",
                 ],
             },
             ToolSurface {
@@ -252,42 +252,92 @@ fn build_unity_quest_routes() -> Vec<RealtimeRoute> {
     vec![
         RealtimeRoute {
             id: "brokkr.unity.quest_input.consume.v0",
-            owner: "brokkr.unity_editor",
-            source: "quest.controllers",
-            sink: "unity.input",
-            schema: "gamecult.xr.quest_controller_input.v0",
+            owner: "Brokkr",
+            source: "muninn:starfire:quest-input",
+            sink: "brokkr.unity_editor:playmode-input",
+            schema: "muninn.quest_input_frame.v1",
             transport: "cultmesh",
-            direction: "consume",
+            direction: "muninn-to-unity",
             notes: vec![
-                "Quest controller state is a command/input stream, not Unity scene truth.",
-                "Unity consumes this stream when play mode or editor tooling has opted in.",
+                "Muninn owns Quest access and input publication.",
+                "Brokkr lowers this stream into the Unity editor play-mode adapter.",
             ],
         },
         RealtimeRoute {
             id: "brokkr.unity.quest_pose.consume.v0",
-            owner: "brokkr.unity_editor",
-            source: "quest.hmd",
-            sink: "unity.camera_rig",
-            schema: "gamecult.xr.quest_pose.v0",
+            owner: "Brokkr",
+            source: "muninn:starfire:quest-poses",
+            sink: "brokkr.unity_editor:deru-rig",
+            schema: "muninn.quest_pose_frame.v1",
             transport: "cultmesh",
-            direction: "consume",
+            direction: "muninn-to-unity",
             notes: vec![
-                "Quest HMD pose can drive editor preview rigs or play-mode camera rigs.",
-                "Pose input does not own persisted transform state unless Unity accepts a command intent.",
+                "Mimir remains the sensor-fusion authority for synthesized poses.",
+                "Brokkr applies the pose stream to the Unity scene representation.",
             ],
         },
         RealtimeRoute {
             id: "brokkr.unity.quest_video.publish.v0",
-            owner: "brokkr.unity_editor",
-            source: "unity.playmode_camera",
-            sink: "quest.video_surface",
+            owner: "Brokkr",
+            source: "brokkr.unity_editor:playmode-warped-frame",
+            sink: "muninn:starfire:quest-warped-video-input",
             schema: "brokkr.unity.warped_video_frame.v0",
             transport: "cultmesh",
-            direction: "publish",
+            direction: "unity-to-muninn",
             notes: vec![
-                "Unity may publish warped frame descriptors for Quest presentation.",
-                "Frame payloads are handles; the typed CultCache document carries ownership and timing.",
+                "Unity owns render output and warp correction for this frame stream.",
+                "Muninn owns Quest device access and final delivery to the attached headset.",
             ],
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_advertises_muninn_owned_quest_routes_for_unity() {
+        let provider = build_provider_advertisement();
+        let unity = provider
+            .tool_surfaces
+            .iter()
+            .find(|surface| surface.id == "brokkr.unity_editor")
+            .expect("Unity surface should be advertised");
+        let blender = provider
+            .tool_surfaces
+            .iter()
+            .find(|surface| surface.id == "brokkr.blender_editor")
+            .expect("Blender surface should be advertised");
+
+        assert!(unity.capabilities.contains(&"quest.input.consume"));
+        assert!(unity.capabilities.contains(&"quest.pose.consume"));
+        assert!(unity.capabilities.contains(&"quest.video_input.publish"));
+        assert!(!blender.capabilities.contains(&"quest.input.consume"));
+
+        let route_sources: Vec<_> = provider
+            .realtime_routes
+            .iter()
+            .map(|route| (route.id, route.source, route.sink, route.transport))
+            .collect();
+
+        assert!(route_sources.contains(&(
+            "brokkr.unity.quest_input.consume.v0",
+            "muninn:starfire:quest-input",
+            "brokkr.unity_editor:playmode-input",
+            "cultmesh"
+        )));
+        assert!(route_sources.contains(&(
+            "brokkr.unity.quest_pose.consume.v0",
+            "muninn:starfire:quest-poses",
+            "brokkr.unity_editor:deru-rig",
+            "cultmesh"
+        )));
+        assert!(route_sources.contains(&(
+            "brokkr.unity.quest_video.publish.v0",
+            "brokkr.unity_editor:playmode-warped-frame",
+            "muninn:starfire:quest-warped-video-input",
+            "cultmesh"
+        )));
+    }
 }
