@@ -7,18 +7,11 @@ namespace GameCult.Brokkr.Editor
         internal const string ProviderId = "brokkr.unity_editor";
         internal const string ToolKind = "unity-editor";
         internal const string DefaultBrokerUri = "cultmesh://brokkr";
-        internal const string DefaultHttpEndpoint = "http://127.0.0.1:8798";
 
         internal static string BrokerUri
         {
             get => EditorPrefs.GetString("GameCult.Brokkr.BrokerUri", DefaultBrokerUri);
             set => EditorPrefs.SetString("GameCult.Brokkr.BrokerUri", value);
-        }
-
-        internal static string HttpEndpoint
-        {
-            get => EditorPrefs.GetString("GameCult.Brokkr.HttpEndpoint", DefaultHttpEndpoint);
-            set => EditorPrefs.SetString("GameCult.Brokkr.HttpEndpoint", value.TrimEnd('/'));
         }
 
         internal static bool AutoPublish
@@ -31,6 +24,12 @@ namespace GameCult.Brokkr.Editor
         {
             get => EditorPrefs.GetBool("GameCult.Brokkr.AutoPollCommands", false);
             set => EditorPrefs.SetBool("GameCult.Brokkr.AutoPollCommands", value);
+        }
+
+        internal static string CultMeshCachePath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.CultMeshCachePath", BrokkrCultMeshMirror.DefaultCachePath());
+            set => EditorPrefs.SetString("GameCult.Brokkr.CultMeshCachePath", value);
         }
     }
 }

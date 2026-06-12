@@ -1,109 +1,124 @@
 using System;
+using GameCult.Caching;
+using MessagePack;
 
 namespace GameCult.Brokkr
 {
+    [CultDocument("brokkr.unity.host_snapshot", "brokkr.unity.host_snapshot.v0")]
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrHostSnapshot
     {
-        public string schema = "gamecult.brokkr.tool_host_snapshot.v0";
-        public string providerId = "brokkr.unity_editor";
-        public string toolKind = "unity-editor";
-        public string projectPath = "";
-        public string observedAt = "";
-        public string unityVersion = "";
-        public string productName = "";
-        public string activeScenePath = "";
-        public int openSceneCount;
-        public string[] selectedObjectNames = Array.Empty<string>();
-        public int assetCount;
-        public string[] capabilities = Array.Empty<string>();
-        public BrokkrGameObjectSnapshot[] sceneObjects = Array.Empty<BrokkrGameObjectSnapshot>();
-        public BrokkrAssetSnapshot[] assets = Array.Empty<BrokkrAssetSnapshot>();
+        [Key(0)] public string schema = "gamecult.brokkr.tool_host_snapshot.v0";
+        [Key(1)] public string providerId = "brokkr.unity_editor";
+        [Key(2)] public string toolKind = "unity-editor";
+        [Key(3)] public string projectPath = "";
+        [Key(4)] public string observedAt = "";
+        [Key(5)] public string unityVersion = "";
+        [Key(6)] public string productName = "";
+        [Key(7)] public string activeScenePath = "";
+        [Key(8)] public int openSceneCount;
+        [Key(9)] public string[] selectedObjectNames = Array.Empty<string>();
+        [Key(10)] public int assetCount;
+        [Key(11)] public string[] capabilities = Array.Empty<string>();
+        [Key(12)] public BrokkrGameObjectSnapshot[] sceneObjects = Array.Empty<BrokkrGameObjectSnapshot>();
+        [Key(13)] public BrokkrAssetSnapshot[] assets = Array.Empty<BrokkrAssetSnapshot>();
     }
 
+    [CultDocument("brokkr.unity.snapshot_receipt", "brokkr.unity.snapshot_receipt.v0")]
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrSnapshotReceipt
     {
-        public string schema = "";
-        public string providerId = "";
-        public string toolKind = "";
-        public string acceptedAt = "";
-        public string status = "";
+        [Key(0)] public string schema = "";
+        [Key(1)] public string providerId = "";
+        [Key(2)] public string toolKind = "";
+        [Key(3)] public string acceptedAt = "";
+        [Key(4)] public string status = "";
     }
 
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrGameObjectSnapshot
     {
-        public string objectId = "";
-        public string name = "";
-        public string path = "";
-        public string scenePath = "";
-        public bool activeSelf;
-        public string tag = "";
-        public int layer;
-        public int childCount;
-        public string parentId = "";
-        public BrokkrComponentSnapshot[] components = Array.Empty<BrokkrComponentSnapshot>();
+        [Key(0)] public string objectId = "";
+        [Key(1)] public string name = "";
+        [Key(2)] public string path = "";
+        [Key(3)] public string scenePath = "";
+        [Key(4)] public bool activeSelf;
+        [Key(5)] public string tag = "";
+        [Key(6)] public int layer;
+        [Key(7)] public int childCount;
+        [Key(8)] public string parentId = "";
+        [Key(9)] public BrokkrComponentSnapshot[] components = Array.Empty<BrokkrComponentSnapshot>();
     }
 
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrComponentSnapshot
     {
-        public string componentId = "";
-        public string typeName = "";
-        public string assemblyQualifiedName = "";
-        public bool enabled;
-        public BrokkrSerializedPropertySnapshot[] properties = Array.Empty<BrokkrSerializedPropertySnapshot>();
+        [Key(0)] public string componentId = "";
+        [Key(1)] public string typeName = "";
+        [Key(2)] public string assemblyQualifiedName = "";
+        [Key(3)] public bool enabled;
+        [Key(4)] public BrokkrSerializedPropertySnapshot[] properties = Array.Empty<BrokkrSerializedPropertySnapshot>();
     }
 
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrSerializedPropertySnapshot
     {
-        public string path = "";
-        public string displayName = "";
-        public string propertyType = "";
-        public string value = "";
-        public bool editable;
+        [Key(0)] public string path = "";
+        [Key(1)] public string displayName = "";
+        [Key(2)] public string propertyType = "";
+        [Key(3)] public string value = "";
+        [Key(4)] public bool editable;
     }
 
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrAssetSnapshot
     {
-        public string path = "";
-        public string guid = "";
-        public string typeName = "";
-        public bool isPrefab;
+        [Key(0)] public string path = "";
+        [Key(1)] public string guid = "";
+        [Key(2)] public string typeName = "";
+        [Key(3)] public bool isPrefab;
     }
 
+    [CultDocument("brokkr.unity.command_intent", "brokkr.unity.command_intent.v0")]
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrUnityCommand
     {
-        public string schema = "gamecult.brokkr.unity_command.v0";
-        public string commandId = "";
-        public string action = "";
-        public string targetObjectId = "";
-        public string name = "";
-        public string componentType = "";
-        public string propertyPath = "";
-        public string value = "";
-        public string assetPath = "";
-        public string parentObjectId = "";
+        [Key(0)] public string schema = "gamecult.brokkr.unity_command.v0";
+        [Key(1)] public string commandId = "";
+        [Key(2)] public string action = "";
+        [Key(3)] public string targetObjectId = "";
+        [Key(4)] public string name = "";
+        [Key(5)] public string componentType = "";
+        [Key(6)] public string propertyPath = "";
+        [Key(7)] public string value = "";
+        [Key(8)] public string assetPath = "";
+        [Key(9)] public string parentObjectId = "";
     }
 
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrUnityCommandEnvelope
     {
-        public BrokkrUnityCommand command;
+        [Key(0)] public BrokkrUnityCommand command;
     }
 
+    [CultDocument("brokkr.unity.command_receipt", "brokkr.unity.command_receipt.v0")]
+    [MessagePackObject]
     [Serializable]
     public sealed class BrokkrUnityCommandReceipt
     {
-        public string schema = "gamecult.brokkr.unity_command_receipt.v0";
-        public string commandId = "";
-        public string status = "";
-        public string message = "";
-        public string objectId = "";
-        public string observedAt = "";
+        [Key(0)] public string schema = "gamecult.brokkr.unity_command_receipt.v0";
+        [Key(1)] public string commandId = "";
+        [Key(2)] public string status = "";
+        [Key(3)] public string message = "";
+        [Key(4)] public string objectId = "";
+        [Key(5)] public string observedAt = "";
     }
 }

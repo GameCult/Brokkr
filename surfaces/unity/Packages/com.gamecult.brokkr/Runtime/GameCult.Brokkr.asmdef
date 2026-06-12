@@ -1,7 +1,10 @@
 {
   "name": "GameCult.Brokkr",
   "rootNamespace": "GameCult.Brokkr",
-  "references": [],
+  "references": [
+    "GameCult.Caching",
+    "MessagePack"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
@@ -12,4 +15,3 @@
   "versionDefines": [],
   "noEngineReferences": false
 }
-

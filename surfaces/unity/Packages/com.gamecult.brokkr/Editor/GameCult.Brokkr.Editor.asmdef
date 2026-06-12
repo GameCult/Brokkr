@@ -2,7 +2,11 @@
   "name": "GameCult.Brokkr.Editor",
   "rootNamespace": "GameCult.Brokkr.Editor",
   "references": [
-    "GameCult.Brokkr"
+    "GameCult.Brokkr",
+    "GameCult.Caching",
+    "GameCult.Mesh",
+    "GameCult.Networking",
+    "R3"
   ],
   "includePlatforms": [
     "Editor"

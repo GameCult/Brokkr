@@ -1,7 +1,8 @@
 # Brokkr Unity Adapter
 
-This package lets the Unity Editor publish a host snapshot to the local Brokkr
-daemon.
+This package lets the Unity Editor publish its scene, component, asset, command,
+receipt, Quest, and Eve/CultUI state as typed CultCache documents synced through
+CultMesh.
 
 ## Install By Local Path
 
@@ -11,53 +12,43 @@ Add this package to a Unity project's `Packages/manifest.json`:
 "com.gamecult.brokkr": "file:E:/Projects/Brokkr/surfaces/unity/Packages/com.gamecult.brokkr"
 ```
 
+Vendor the CultMesh runtime DLLs before opening Unity:
+
+```powershell
+.\tools\vendor-cultmesh-unity.ps1
+```
+
 Then open `GameCult > Brokkr`.
 
 ## Local Smoke
 
-Start the daemon:
-
-```powershell
-cargo run -p brokkr-daemon -- serve
-```
-
 In Unity:
 
 1. Open `GameCult > Brokkr`.
-2. Leave HTTP endpoint as `http://127.0.0.1:8798`.
-3. Click `Ping Brokkr`.
-4. Click `Capture Snapshot`.
-5. Click `Publish Snapshot`.
+2. Confirm `Broker URI` is `cultmesh://brokkr`.
+3. Confirm `CultMesh Cache` points at `.brokkr/unity-editor.ccmp`.
+4. Click `Start CultMesh Mirror`.
+5. Click `Capture Snapshot`.
+6. Click `Publish Mirror`.
 
-The daemon should retain the latest Unity snapshot at:
-
-```text
-http://127.0.0.1:8798/hosts
-```
-
-The richer read surfaces are available at:
+The Unity adapter writes the latest editor snapshot to:
 
 ```text
-http://127.0.0.1:8798/unity/scene
-http://127.0.0.1:8798/unity/assets
-http://127.0.0.1:8798/eve/unity/gui
-http://127.0.0.1:8798/eve/unity/tui
+unity/host/current
 ```
 
-Writes are queued through Brokkr and executed by the Unity editor adapter:
+Verse-side command clients write `brokkr.unity.command_intent.v0` documents to:
 
-```powershell
-@'
-{
-  "schema": "gamecult.brokkr.unity_command.v0",
-  "commandId": "demo-create",
-  "action": "createGameObject",
-  "name": "Brokkr Demo"
-}
-'@ | curl.exe -s -X POST http://127.0.0.1:8798/commands/unity -H "Content-Type: application/json" --data-binary "@-"
+```text
+unity/commands/{commandId}
 ```
 
-Then click `Poll Command` in Unity or enable `Auto Poll Commands`.
+Unity watches those command intents, mutates the editor, and publishes receipts
+to:
 
-The Unity plugin is still an adapter. Brokkr owns the Verse-facing provider and
-receipt lane; Unity owns Unity editor truth.
+```text
+unity/receipts/{commandId}
+```
+
+The Unity plugin is still an adapter. Unity owns Unity editor truth; Brokkr owns
+provider discovery; CultCache and CultMesh own the live mirror lane.

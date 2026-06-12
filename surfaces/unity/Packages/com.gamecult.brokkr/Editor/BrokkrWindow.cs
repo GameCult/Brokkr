@@ -8,13 +8,14 @@ namespace GameCult.Brokkr.Editor
     public sealed class BrokkrWindow : EditorWindow
     {
         private string brokerUri = BrokkrSettings.DefaultBrokerUri;
-        private string httpEndpoint = BrokkrSettings.DefaultHttpEndpoint;
+        private string cultMeshCachePath = "";
         private bool autoPublish;
         private bool autoPollCommands;
         private BrokkrHostSnapshot lastSnapshot;
         private string lastReceipt = "No snapshot published yet.";
         private MessageType lastMessageType = MessageType.Info;
         private double nextPollAt;
+        private BrokkrCultMeshMirror mirror;
 
         [MenuItem("GameCult/Brokkr")]
         public static void Open()
@@ -25,7 +26,7 @@ namespace GameCult.Brokkr.Editor
         private void OnEnable()
         {
             brokerUri = BrokkrSettings.BrokerUri;
-            httpEndpoint = BrokkrSettings.HttpEndpoint;
+            cultMeshCachePath = BrokkrSettings.CultMeshCachePath;
             autoPublish = BrokkrSettings.AutoPublish;
             autoPollCommands = BrokkrSettings.AutoPollCommands;
             Selection.selectionChanged += Repaint;
@@ -40,6 +41,8 @@ namespace GameCult.Brokkr.Editor
             EditorSceneManagerBridge.SceneDirtied -= OnEditorSignal;
             EditorApplication.playModeStateChanged -= OnPlayModeChanged;
             EditorApplication.update -= OnEditorUpdate;
+            mirror?.Dispose();
+            mirror = null;
         }
 
         private void OnGUI()
@@ -47,14 +50,14 @@ namespace GameCult.Brokkr.Editor
             EditorGUILayout.LabelField("Provider", BrokkrSettings.ProviderId);
             EditorGUILayout.LabelField("Tool Kind", BrokkrSettings.ToolKind);
             brokerUri = EditorGUILayout.TextField("Broker URI", brokerUri);
-            httpEndpoint = EditorGUILayout.TextField("HTTP Endpoint", httpEndpoint);
+            cultMeshCachePath = EditorGUILayout.TextField("CultMesh Cache", cultMeshCachePath);
             autoPublish = EditorGUILayout.Toggle("Auto Publish", autoPublish);
             autoPollCommands = EditorGUILayout.Toggle("Auto Poll Commands", autoPollCommands);
 
             if (GUILayout.Button("Save Settings"))
             {
                 BrokkrSettings.BrokerUri = brokerUri;
-                BrokkrSettings.HttpEndpoint = httpEndpoint;
+                BrokkrSettings.CultMeshCachePath = cultMeshCachePath;
                 BrokkrSettings.AutoPublish = autoPublish;
                 BrokkrSettings.AutoPollCommands = autoPollCommands;
                 SetStatus("Settings saved.", MessageType.Info);
@@ -63,12 +66,12 @@ namespace GameCult.Brokkr.Editor
             EditorGUILayout.Space();
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Capture Snapshot"))
+                if (GUILayout.Button("Start CultMesh Mirror"))
                 {
-                    CaptureSnapshot();
+                    StartMirror();
                 }
 
-                if (GUILayout.Button("Publish Snapshot"))
+                if (GUILayout.Button("Publish Mirror"))
                 {
                     PublishSnapshot();
                 }
@@ -76,12 +79,12 @@ namespace GameCult.Brokkr.Editor
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Ping Brokkr"))
+                if (GUILayout.Button("Capture Snapshot"))
                 {
-                    PingBroker();
+                    CaptureSnapshot();
                 }
 
-                if (GUILayout.Button("Poll Command"))
+                if (GUILayout.Button("Poll Mirror Command"))
                 {
                     PollAndExecuteCommand(false);
                 }
@@ -118,8 +121,9 @@ namespace GameCult.Brokkr.Editor
                     lastSnapshot = BrokkrUnitySnapshotBuilder.Capture();
                 }
 
-                var receipt = BrokkrBrokerClient.PublishUnitySnapshot(httpEndpoint, lastSnapshot);
-                SetStatus($"Snapshot {receipt.status}: {receipt.acceptedAt}", MessageType.Info);
+                RequireMirror();
+                mirror.PublishSnapshotAsync(lastSnapshot).GetAwaiter().GetResult();
+                SetStatus($"Mirrored Unity snapshot: {lastSnapshot.observedAt}", MessageType.Info);
             }
             catch (Exception error)
             {
@@ -127,12 +131,13 @@ namespace GameCult.Brokkr.Editor
             }
         }
 
-        private void PingBroker()
+        private async void StartMirror()
         {
             try
             {
-                var health = BrokkrBrokerClient.GetHealth(httpEndpoint);
-                SetStatus(health, MessageType.Info);
+                mirror ??= new BrokkrCultMeshMirror();
+                await mirror.StartAsync(cultMeshCachePath);
+                SetStatus($"CultMesh mirror running: {mirror.CachePath}", MessageType.Info);
             }
             catch (Exception error)
             {
@@ -144,21 +149,21 @@ namespace GameCult.Brokkr.Editor
         {
             try
             {
-                var command = BrokkrBrokerClient.GetNextUnityCommand(httpEndpoint);
-                if (command == null || string.IsNullOrEmpty(command.commandId))
+                RequireMirror();
+                if (!mirror.TryDequeueCommand(out var command) || string.IsNullOrEmpty(command.commandId))
                 {
                     if (!quiet)
                     {
-                        SetStatus("No queued Unity command.", MessageType.Info);
+                        SetStatus("No queued CultMesh Unity command.", MessageType.Info);
                     }
 
                     return;
                 }
 
                 var receipt = BrokkrUnityCommandExecutor.Execute(command);
-                BrokkrBrokerClient.PublishUnityCommandReceipt(httpEndpoint, receipt);
+                mirror.PublishReceiptAsync(receipt).GetAwaiter().GetResult();
                 lastSnapshot = BrokkrUnitySnapshotBuilder.Capture();
-                BrokkrBrokerClient.PublishUnitySnapshot(httpEndpoint, lastSnapshot);
+                mirror.PublishSnapshotAsync(lastSnapshot).GetAwaiter().GetResult();
                 SetStatus($"Command {receipt.status}: {receipt.commandId} {receipt.message}", MessageType.Info);
             }
             catch (Exception error)
@@ -194,6 +199,14 @@ namespace GameCult.Brokkr.Editor
 
             nextPollAt = EditorApplication.timeSinceStartup + 1.0;
             PollAndExecuteCommand(true);
+        }
+
+        private void RequireMirror()
+        {
+            if (mirror == null || !mirror.IsRunning)
+            {
+                throw new InvalidOperationException("Start the Brokkr CultMesh mirror first.");
+            }
         }
 
         private void SetStatus(string message, MessageType messageType)
