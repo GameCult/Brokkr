@@ -10,9 +10,11 @@ namespace GameCult.Brokkr.Editor
         private string brokerUri = BrokkrSettings.DefaultBrokerUri;
         private string httpEndpoint = BrokkrSettings.DefaultHttpEndpoint;
         private bool autoPublish;
+        private bool autoPollCommands;
         private BrokkrHostSnapshot lastSnapshot;
         private string lastReceipt = "No snapshot published yet.";
         private MessageType lastMessageType = MessageType.Info;
+        private double nextPollAt;
 
         [MenuItem("GameCult/Brokkr")]
         public static void Open()
@@ -25,9 +27,11 @@ namespace GameCult.Brokkr.Editor
             brokerUri = BrokkrSettings.BrokerUri;
             httpEndpoint = BrokkrSettings.HttpEndpoint;
             autoPublish = BrokkrSettings.AutoPublish;
+            autoPollCommands = BrokkrSettings.AutoPollCommands;
             Selection.selectionChanged += Repaint;
             EditorSceneManagerBridge.SceneDirtied += OnEditorSignal;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
+            EditorApplication.update += OnEditorUpdate;
         }
 
         private void OnDisable()
@@ -35,6 +39,7 @@ namespace GameCult.Brokkr.Editor
             Selection.selectionChanged -= Repaint;
             EditorSceneManagerBridge.SceneDirtied -= OnEditorSignal;
             EditorApplication.playModeStateChanged -= OnPlayModeChanged;
+            EditorApplication.update -= OnEditorUpdate;
         }
 
         private void OnGUI()
@@ -44,12 +49,14 @@ namespace GameCult.Brokkr.Editor
             brokerUri = EditorGUILayout.TextField("Broker URI", brokerUri);
             httpEndpoint = EditorGUILayout.TextField("HTTP Endpoint", httpEndpoint);
             autoPublish = EditorGUILayout.Toggle("Auto Publish", autoPublish);
+            autoPollCommands = EditorGUILayout.Toggle("Auto Poll Commands", autoPollCommands);
 
             if (GUILayout.Button("Save Settings"))
             {
                 BrokkrSettings.BrokerUri = brokerUri;
                 BrokkrSettings.HttpEndpoint = httpEndpoint;
                 BrokkrSettings.AutoPublish = autoPublish;
+                BrokkrSettings.AutoPollCommands = autoPollCommands;
                 SetStatus("Settings saved.", MessageType.Info);
             }
 
@@ -67,9 +74,17 @@ namespace GameCult.Brokkr.Editor
                 }
             }
 
-            if (GUILayout.Button("Ping Brokkr"))
+            using (new EditorGUILayout.HorizontalScope())
             {
-                PingBroker();
+                if (GUILayout.Button("Ping Brokkr"))
+                {
+                    PingBroker();
+                }
+
+                if (GUILayout.Button("Poll Command"))
+                {
+                    PollAndExecuteCommand(false);
+                }
             }
 
             EditorGUILayout.Space();
@@ -83,6 +98,7 @@ namespace GameCult.Brokkr.Editor
                 EditorGUILayout.LabelField("Active Scene", lastSnapshot.activeScenePath);
                 EditorGUILayout.LabelField("Open Scenes", lastSnapshot.openSceneCount.ToString());
                 EditorGUILayout.LabelField("Assets", lastSnapshot.assetCount.ToString());
+                EditorGUILayout.LabelField("Scene Objects", lastSnapshot.sceneObjects.Length.ToString());
                 EditorGUILayout.LabelField("Selection", string.Join(", ", lastSnapshot.selectedObjectNames));
             }
         }
@@ -124,6 +140,33 @@ namespace GameCult.Brokkr.Editor
             }
         }
 
+        private void PollAndExecuteCommand(bool quiet)
+        {
+            try
+            {
+                var command = BrokkrBrokerClient.GetNextUnityCommand(httpEndpoint);
+                if (command == null || string.IsNullOrEmpty(command.commandId))
+                {
+                    if (!quiet)
+                    {
+                        SetStatus("No queued Unity command.", MessageType.Info);
+                    }
+
+                    return;
+                }
+
+                var receipt = BrokkrUnityCommandExecutor.Execute(command);
+                BrokkrBrokerClient.PublishUnityCommandReceipt(httpEndpoint, receipt);
+                lastSnapshot = BrokkrUnitySnapshotBuilder.Capture();
+                BrokkrBrokerClient.PublishUnitySnapshot(httpEndpoint, lastSnapshot);
+                SetStatus($"Command {receipt.status}: {receipt.commandId} {receipt.message}", MessageType.Info);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
         private void OnEditorSignal()
         {
             if (autoPublish)
@@ -140,6 +183,17 @@ namespace GameCult.Brokkr.Editor
         private void OnPlayModeChanged(PlayModeStateChange _)
         {
             OnEditorSignal();
+        }
+
+        private void OnEditorUpdate()
+        {
+            if (!autoPollCommands || EditorApplication.timeSinceStartup < nextPollAt)
+            {
+                return;
+            }
+
+            nextPollAt = EditorApplication.timeSinceStartup + 1.0;
+            PollAndExecuteCommand(true);
         }
 
         private void SetStatus(string message, MessageType messageType)

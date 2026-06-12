@@ -9,9 +9,13 @@ daemon, beginning with Unity and Blender plugin surfaces.
 
 Brokkr starts as a Rust daemon that emits a provider advertisement and exposes a
 local HTTP adapter lane for tool plugins. Unity can capture a host snapshot from
-the editor and publish it to `POST /hosts/unity/snapshot`; Brokkr validates and
-retains that snapshot for `GET /hosts`. Blender still has a thin plugin scaffold
-with host-local metadata and connection settings.
+the editor, including scene graph, components, serialized component state, and
+asset library records, then publish it to `POST /hosts/unity/snapshot`. Brokkr
+validates and retains that snapshot for `GET /hosts`, `/unity/scene`,
+`/unity/assets`, and Eve GUI/TUI lowerings. Unity writes are queued through
+`POST /commands/unity`; the Unity adapter polls, executes the command, and posts
+a receipt. Blender still has a thin plugin scaffold with host-local metadata and
+connection settings.
 
 ## Invariants
 
@@ -56,6 +60,7 @@ Outputs:
 - `gamecult.brokkr.command_request.v0`
 - `gamecult.brokkr.command_receipt.v0`
 - local adapter receipts for accepted host snapshots
+- Unity editor GUI/TUI Eve surface projections
 - Eve/CultUI surface documents for host status, selection, assets, scene/object
   trees, command palette, and receipt history.
 

@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -92,11 +94,58 @@ struct ToolHostSnapshot {
     selected_object_names: Vec<String>,
     asset_count: Option<u32>,
     capabilities: Vec<String>,
+    #[serde(default)]
+    scene_objects: Vec<Value>,
+    #[serde(default)]
+    assets: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnityCommand {
+    schema: String,
+    command_id: String,
+    action: String,
+    #[serde(default)]
+    target_object_id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    component_type: String,
+    #[serde(default)]
+    property_path: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    asset_path: String,
+    #[serde(default)]
+    parent_object_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnityCommandEnvelope {
+    command: Option<UnityCommand>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnityCommandReceipt {
+    schema: String,
+    command_id: String,
+    status: String,
+    message: String,
+    #[serde(default)]
+    object_id: String,
+    observed_at: String,
 }
 
 #[derive(Default)]
 struct BrokerState {
     unity_snapshot: Option<ToolHostSnapshot>,
+    unity_command_queue: VecDeque<UnityCommand>,
+    unity_receipts: Vec<UnityCommandReceipt>,
+    next_command_number: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +160,52 @@ struct HealthResponse<'a> {
 #[serde(rename_all = "camelCase")]
 struct HostSnapshotsResponse {
     unity: Option<ToolHostSnapshot>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnitySceneResponse {
+    provider_id: &'static str,
+    observed_at: Option<String>,
+    scene_objects: Vec<Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnityAssetsResponse {
+    provider_id: &'static str,
+    observed_at: Option<String>,
+    assets: Vec<Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EveSurfaceDocument {
+    schema: &'static str,
+    surface_id: &'static str,
+    mode: &'static str,
+    title: &'static str,
+    provider_id: &'static str,
+    updated_at: Option<String>,
+    sections: Vec<EveSurfaceSection>,
+    commands: Vec<EveCommandAffordance>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EveSurfaceSection {
+    id: &'static str,
+    title: &'static str,
+    kind: &'static str,
+    items: Vec<Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EveCommandAffordance {
+    id: &'static str,
+    title: &'static str,
+    command_schema: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -191,6 +286,48 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<BrokerState>>) -> R
                 },
             )?
         }
+        ("GET", "/unity/scene") => {
+            let state = state.lock().expect("broker state poisoned");
+            let snapshot = state.unity_snapshot.clone();
+            json_response(
+                200,
+                &UnitySceneResponse {
+                    provider_id: "brokkr.unity_editor",
+                    observed_at: snapshot.as_ref().map(|item| item.observed_at.clone()),
+                    scene_objects: snapshot
+                        .as_ref()
+                        .map(|item| item.scene_objects.clone())
+                        .unwrap_or_default(),
+                },
+            )?
+        }
+        ("GET", "/unity/assets") => {
+            let state = state.lock().expect("broker state poisoned");
+            let snapshot = state.unity_snapshot.clone();
+            json_response(
+                200,
+                &UnityAssetsResponse {
+                    provider_id: "brokkr.unity_editor",
+                    observed_at: snapshot.as_ref().map(|item| item.observed_at.clone()),
+                    assets: snapshot
+                        .as_ref()
+                        .map(|item| item.assets.clone())
+                        .unwrap_or_default(),
+                },
+            )?
+        }
+        ("GET", "/unity/receipts") => {
+            let state = state.lock().expect("broker state poisoned");
+            json_response(200, &state.unity_receipts)?
+        }
+        ("GET", "/eve/unity/gui") => {
+            let state = state.lock().expect("broker state poisoned");
+            json_response(200, &build_unity_eve_surface(&state, "gui"))?
+        }
+        ("GET", "/eve/unity/tui") => {
+            let state = state.lock().expect("broker state poisoned");
+            json_response(200, &build_unity_eve_surface(&state, "tui"))?
+        }
         ("POST", "/hosts/unity/snapshot") => {
             let snapshot: ToolHostSnapshot = serde_json::from_slice(&request.body)
                 .context("invalid Unity host snapshot JSON")?;
@@ -205,11 +342,139 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<BrokerState>>) -> R
             state.lock().expect("broker state poisoned").unity_snapshot = Some(snapshot);
             json_response(202, &receipt)?
         }
+        ("POST", "/commands/unity") => {
+            let mut command: UnityCommand =
+                serde_json::from_slice(&request.body).context("invalid Unity command JSON")?;
+            validate_unity_command(&command)?;
+            let mut state = state.lock().expect("broker state poisoned");
+            if command.command_id.is_empty() {
+                state.next_command_number += 1;
+                command.command_id = format!("unity-command-{}", state.next_command_number);
+            }
+            state.unity_command_queue.push_back(command.clone());
+            json_response(202, &command)?
+        }
+        ("GET", "/hosts/unity/commands/next") => {
+            let mut state = state.lock().expect("broker state poisoned");
+            let command = state.unity_command_queue.pop_front();
+            json_response(200, &UnityCommandEnvelope { command })?
+        }
+        ("POST", "/hosts/unity/commands/receipt") => {
+            let receipt: UnityCommandReceipt = serde_json::from_slice(&request.body)
+                .context("invalid Unity command receipt JSON")?;
+            validate_unity_receipt(&receipt)?;
+            state
+                .lock()
+                .expect("broker state poisoned")
+                .unity_receipts
+                .push(receipt.clone());
+            json_response(202, &receipt)?
+        }
         _ => text_response(404, "not found"),
     };
 
     stream.write_all(response.as_bytes())?;
     Ok(())
+}
+
+fn validate_unity_command(command: &UnityCommand) -> Result<()> {
+    if command.schema != "gamecult.brokkr.unity_command.v0" {
+        bail!("unexpected Unity command schema: {}", command.schema);
+    }
+    match command.action.as_str() {
+        "createGameObject"
+        | "attachComponent"
+        | "setComponentProperty"
+        | "instantiatePrefab"
+        | "createPrefabVariant" => Ok(()),
+        _ => bail!("unsupported Unity command action: {}", command.action),
+    }
+}
+
+fn validate_unity_receipt(receipt: &UnityCommandReceipt) -> Result<()> {
+    if receipt.schema != "gamecult.brokkr.unity_command_receipt.v0" {
+        bail!("unexpected Unity receipt schema: {}", receipt.schema);
+    }
+    Ok(())
+}
+
+fn build_unity_eve_surface(state: &BrokerState, mode: &'static str) -> EveSurfaceDocument {
+    let snapshot = state.unity_snapshot.clone();
+    let scene_objects = snapshot
+        .as_ref()
+        .map(|item| item.scene_objects.iter().take(80).cloned().collect())
+        .unwrap_or_default();
+    let assets = snapshot
+        .as_ref()
+        .map(|item| item.assets.iter().take(80).cloned().collect())
+        .unwrap_or_default();
+    let receipts = state
+        .unity_receipts
+        .iter()
+        .rev()
+        .take(25)
+        .map(|receipt| serde_json::to_value(receipt).unwrap_or(Value::Null))
+        .collect();
+
+    EveSurfaceDocument {
+        schema: "gamecult.eve.surface.v1",
+        surface_id: if mode == "tui" {
+            "brokkr.eve.unity_editor_tui.v0"
+        } else {
+            "brokkr.eve.unity_editor_gui.v0"
+        },
+        mode,
+        title: "Unity Editor",
+        provider_id: "brokkr.unity_editor",
+        updated_at: snapshot.as_ref().map(|item| item.observed_at.clone()),
+        sections: vec![
+            EveSurfaceSection {
+                id: "scene",
+                title: "Scene Graph",
+                kind: "tree",
+                items: scene_objects,
+            },
+            EveSurfaceSection {
+                id: "assets",
+                title: "Asset Library",
+                kind: "table",
+                items: assets,
+            },
+            EveSurfaceSection {
+                id: "receipts",
+                title: "Command Receipts",
+                kind: "log",
+                items: receipts,
+            },
+        ],
+        commands: vec![
+            EveCommandAffordance {
+                id: "createGameObject",
+                title: "Create GameObject",
+                command_schema: "gamecult.brokkr.unity_command.v0",
+            },
+            EveCommandAffordance {
+                id: "attachComponent",
+                title: "Attach Component",
+                command_schema: "gamecult.brokkr.unity_command.v0",
+            },
+            EveCommandAffordance {
+                id: "setComponentProperty",
+                title: "Set Component Property",
+                command_schema: "gamecult.brokkr.unity_command.v0",
+            },
+            EveCommandAffordance {
+                id: "instantiatePrefab",
+                title: "Instantiate Prefab",
+                command_schema: "gamecult.brokkr.unity_command.v0",
+            },
+            EveCommandAffordance {
+                id: "createPrefabVariant",
+                title: "Create Prefab Variant",
+                command_schema: "gamecult.brokkr.unity_command.v0",
+            },
+        ],
+    }
 }
 
 fn validate_unity_snapshot(snapshot: &ToolHostSnapshot) -> Result<()> {
@@ -372,6 +637,18 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                 id: "brokkr.eve.command_receipts.v0",
                 title: "Command Receipts",
                 cult_mesh_uri: "cultmesh://brokkr/eve/command-receipts",
+                schema: "gamecult.eve.surface.v1",
+            },
+            EveSurface {
+                id: "brokkr.eve.unity_editor_gui.v0",
+                title: "Unity Editor GUI",
+                cult_mesh_uri: "cultmesh://brokkr/eve/unity/gui",
+                schema: "gamecult.eve.surface.v1",
+            },
+            EveSurface {
+                id: "brokkr.eve.unity_editor_tui.v0",
+                title: "Unity Editor TUI",
+                cult_mesh_uri: "cultmesh://brokkr/eve/unity/tui",
                 schema: "gamecult.eve.surface.v1",
             },
         ],

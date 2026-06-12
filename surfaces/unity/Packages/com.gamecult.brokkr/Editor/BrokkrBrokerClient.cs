@@ -21,6 +21,19 @@ namespace GameCult.Brokkr.Editor
             return JsonUtility.FromJson<BrokkrSnapshotReceipt>(response);
         }
 
+        internal static BrokkrUnityCommand GetNextUnityCommand(string endpoint)
+        {
+            var response = Send(endpoint, "/hosts/unity/commands/next", "GET", null);
+            var envelope = JsonUtility.FromJson<BrokkrUnityCommandEnvelope>(response);
+            return envelope?.command;
+        }
+
+        internal static void PublishUnityCommandReceipt(string endpoint, BrokkrUnityCommandReceipt receipt)
+        {
+            var json = JsonUtility.ToJson(receipt);
+            Send(endpoint, "/hosts/unity/commands/receipt", "POST", json);
+        }
+
         private static string Send(string endpoint, string path, string method, string body)
         {
             var request = (HttpWebRequest)WebRequest.Create(endpoint.TrimEnd('/') + path);
@@ -54,4 +67,3 @@ namespace GameCult.Brokkr.Editor
         }
     }
 }
-

@@ -26,5 +26,11 @@ namespace GameCult.Brokkr.Editor
             get => EditorPrefs.GetBool("GameCult.Brokkr.AutoPublish", false);
             set => EditorPrefs.SetBool("GameCult.Brokkr.AutoPublish", value);
         }
+
+        internal static bool AutoPollCommands
+        {
+            get => EditorPrefs.GetBool("GameCult.Brokkr.AutoPollCommands", false);
+            set => EditorPrefs.SetBool("GameCult.Brokkr.AutoPollCommands", value);
+        }
     }
 }
