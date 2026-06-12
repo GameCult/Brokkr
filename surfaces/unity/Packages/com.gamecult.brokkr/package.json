@@ -1,0 +1,11 @@
+{
+  "name": "com.gamecult.brokkr",
+  "version": "0.1.0",
+  "displayName": "Brokkr",
+  "description": "Unity Editor adapter for the Brokkr CultMesh creative-tool broker.",
+  "unity": "2022.3",
+  "author": {
+    "name": "GameCult"
+  }
+}
+

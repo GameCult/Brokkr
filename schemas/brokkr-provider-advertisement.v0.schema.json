@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gamecult.brokkr.provider_advertisement.v0",
+  "title": "Brokkr Provider Advertisement",
+  "type": "object",
+  "required": ["schema", "provider", "authority", "transports", "toolSurfaces", "eveSurfaces", "commandPolicy"],
+  "properties": {
+    "schema": { "const": "gamecult.brokkr.provider_advertisement.v0" },
+    "provider": { "type": "object" },
+    "authority": { "type": "object" },
+    "transports": { "type": "array" },
+    "toolSurfaces": { "type": "array" },
+    "eveSurfaces": { "type": "array" },
+    "commandPolicy": { "type": "object" }
+  }
+}
+

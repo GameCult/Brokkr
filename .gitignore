@@ -1,0 +1,15 @@
+target/
+.brokkr/
+.brokkr-smoke/
+*.user
+*.suo
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+__pycache__/
+*.pyc
+
