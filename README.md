@@ -42,3 +42,17 @@ cargo run -p brokkr-daemon -- provider
 The first smoke prints the typed provider advertisement. That is deliberately
 small: discovery shape first, live sockets second.
 
+## Unity Smoke
+
+```powershell
+cargo run -p brokkr-daemon -- serve
+```
+
+Add the Unity package by local path:
+
+```json
+"com.gamecult.brokkr": "file:E:/Projects/Brokkr/surfaces/unity/Packages/com.gamecult.brokkr"
+```
+
+Then open `GameCult > Brokkr` in Unity and publish a snapshot to the local
+daemon.

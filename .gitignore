@@ -1,6 +1,7 @@
 target/
 .brokkr/
 .brokkr-smoke/
+BrokkrUnitySmoke/
 *.user
 *.suo
 Library/
@@ -12,4 +13,3 @@ Logs/
 UserSettings/
 __pycache__/
 *.pyc
-

@@ -7,11 +7,11 @@ daemon, beginning with Unity and Blender plugin surfaces.
 
 ## Current Mechanism
 
-Brokkr starts as a Rust daemon skeleton that can emit a provider advertisement.
-Unity and Blender each have a thin plugin scaffold with host-local metadata and
-connection settings. The live transport is intentionally not claimed yet; the
-first contract establishes owner, inputs, outputs, command policy, and surface
-names.
+Brokkr starts as a Rust daemon that emits a provider advertisement and exposes a
+local HTTP adapter lane for tool plugins. Unity can capture a host snapshot from
+the editor and publish it to `POST /hosts/unity/snapshot`; Brokkr validates and
+retains that snapshot for `GET /hosts`. Blender still has a thin plugin scaffold
+with host-local metadata and connection settings.
 
 ## Invariants
 
@@ -55,6 +55,7 @@ Outputs:
 - `gamecult.brokkr.tool_host_snapshot.v0`
 - `gamecult.brokkr.command_request.v0`
 - `gamecult.brokkr.command_receipt.v0`
+- local adapter receipts for accepted host snapshots
 - Eve/CultUI surface documents for host status, selection, assets, scene/object
   trees, command palette, and receipt history.
 
@@ -83,4 +84,3 @@ Deletion Line:
 
 If a plugin grows its own command policy, provider advertisement, or durable
 state ledger, cut it back into an adapter and move the authority into Brokkr.
-
