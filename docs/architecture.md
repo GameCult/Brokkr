@@ -64,6 +64,9 @@ Outputs:
 - `brokkr.unity.snapshot_receipt.v0`
 - `brokkr.unity.quest_route.v0`
 - `brokkr.unity.warped_video_frame.v0`
+- `brokkr.blender.host_snapshot.v0`
+- `brokkr.blender.command_intent.v0`
+- `brokkr.blender.command_receipt.v0`
 - Eve/CultUI surface documents for host status, selection, assets, scene/object
   trees, component state, command affordances, and receipt history.
 
@@ -85,6 +88,8 @@ Shared Paths:
 
 - Direct Unity commands, programmatic commands, UI-triggered commands, and replayed
   command receipts use the same command-intent and receipt documents.
+- Direct Blender commands, UI-triggered commands, and replayed command receipts
+  use the same command-intent and receipt documents.
 - Host snapshots from all tools carry host id, tool kind, project path,
   observed-at timestamp, capabilities, and authority owner.
 

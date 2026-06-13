@@ -55,6 +55,28 @@ try {
             throw "Missing vendored CultMesh Unity dependency: $path"
         }
     }
+
+    $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+    if (Test-Path $bundledPython) {
+        $pythonExe = $bundledPython
+    }
+    else {
+        $pythonCommand = Get-Command py -ErrorAction SilentlyContinue
+        if ($null -ne $pythonCommand) {
+            $pythonExe = $pythonCommand.Source
+        }
+        else {
+            $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+            if ($null -ne $pythonCommand -and $pythonCommand.Source -notlike "*\WindowsApps\python.exe") {
+                $pythonExe = $pythonCommand.Source
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($pythonExe)) {
+        throw "Missing Python runtime for Blender adapter syntax check."
+    }
+    & $pythonExe -m py_compile surfaces\blender\brokkr_bridge\blender_target.py surfaces\blender\brokkr_bridge\__init__.py
+    Assert-NativeSuccess "Blender adapter Python compile"
 }
 finally {
     Pop-Location

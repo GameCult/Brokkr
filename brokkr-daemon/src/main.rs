@@ -169,13 +169,21 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                 id: "brokkr.blender_editor",
                 title: "Blender Editor",
                 tool_kind: "blender-editor",
-                adapter: "surfaces/blender/brokkr_blender",
+                adapter: "surfaces/blender/brokkr_bridge",
                 capabilities: vec![
                     "cultcache.mirror.publish",
                     "cultcache.intent.watch",
                     "host.status.read",
                     "scene.tree.read",
+                    "object.graph.read",
+                    "object.transform.write",
+                    "object.create",
+                    "object.delete",
                     "asset.catalog.read",
+                    "material.catalog.read",
+                    "material.assign",
+                    "selection.read",
+                    "selection.write",
                     "command.receipt.publish",
                     "eve.gui.publish",
                     "eve.tui.publish",
@@ -218,6 +226,24 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                 schema: "brokkr.unity.warped_video_frame.v0",
                 owner: "brokkr.unity_editor",
                 record_hint: "unity/quest/video/{frameId}",
+            },
+            MirrorDocument {
+                name: "Blender host snapshot",
+                schema: "brokkr.blender.host_snapshot.v0",
+                owner: "brokkr.blender_editor",
+                record_hint: "blender/host/current",
+            },
+            MirrorDocument {
+                name: "Blender command intent",
+                schema: "brokkr.blender.command_intent.v0",
+                owner: "Verse command clients",
+                record_hint: "blender/commands/{commandId}",
+            },
+            MirrorDocument {
+                name: "Blender command receipt",
+                schema: "brokkr.blender.command_receipt.v0",
+                owner: "brokkr.blender_editor",
+                record_hint: "blender/receipts/{commandId}",
             },
         ],
         realtime_routes: build_unity_quest_routes(),
@@ -314,6 +340,9 @@ mod tests {
         assert!(unity.capabilities.contains(&"quest.pose.consume"));
         assert!(unity.capabilities.contains(&"quest.video_input.publish"));
         assert!(!blender.capabilities.contains(&"quest.input.consume"));
+        assert!(blender.capabilities.contains(&"object.graph.read"));
+        assert!(blender.capabilities.contains(&"object.transform.write"));
+        assert!(blender.capabilities.contains(&"material.assign"));
 
         let route_sources: Vec<_> = provider
             .realtime_routes
@@ -338,6 +367,32 @@ mod tests {
             "brokkr.unity_editor:playmode-warped-frame",
             "muninn:starfire:quest-warped-video-input",
             "cultmesh"
+        )));
+    }
+
+    #[test]
+    fn provider_advertises_blender_mirror_documents() {
+        let provider = build_provider_advertisement();
+        let documents: Vec<_> = provider
+            .mirror_documents
+            .iter()
+            .map(|document| (document.schema, document.owner, document.record_hint))
+            .collect();
+
+        assert!(documents.contains(&(
+            "brokkr.blender.host_snapshot.v0",
+            "brokkr.blender_editor",
+            "blender/host/current"
+        )));
+        assert!(documents.contains(&(
+            "brokkr.blender.command_intent.v0",
+            "Verse command clients",
+            "blender/commands/{commandId}"
+        )));
+        assert!(documents.contains(&(
+            "brokkr.blender.command_receipt.v0",
+            "brokkr.blender_editor",
+            "blender/receipts/{commandId}"
         )));
     }
 }

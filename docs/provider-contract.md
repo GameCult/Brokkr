@@ -37,6 +37,9 @@ Primary Eve surface id: `brokkr.eve.tool_broker.v0`
 - `brokkr.unity.snapshot_receipt.v0` at `unity/receipts/snapshots/{observedAt}`
 - `brokkr.unity.quest_route.v0` at `unity/quest-routes/{routeId}`
 - `brokkr.unity.warped_video_frame.v0` at `unity/quest/video/{frameId}`
+- `brokkr.blender.host_snapshot.v0` at `blender/host/current`
+- `brokkr.blender.command_intent.v0` at `blender/commands/{commandId}`
+- `brokkr.blender.command_receipt.v0` at `blender/receipts/{commandId}`
 
 ## Unity Command Actions
 
@@ -51,6 +54,21 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 
 Unity owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Unity executes recognized intents and publishes
+receipts.
+
+## Blender Command Actions
+
+All Blender writes use `brokkr.blender.command_intent.v0` and receive
+`brokkr.blender.command_receipt.v0`.
+
+- `createObject`
+- `deleteObject`
+- `setObjectTransform`
+- `selectObject`
+- `assignMaterial`
+
+Blender owns the mutation. Brokkr advertises the command surface; Verse clients
+write typed command intents; Blender executes recognized intents and publishes
 receipts.
 
 ## Eve/CultUI Lowerings
