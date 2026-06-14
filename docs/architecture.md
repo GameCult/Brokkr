@@ -18,6 +18,11 @@ surface projections. Verse-side clients write typed command-intent documents
 into the same mirror; Unity watches those intents, mutates the editor, and
 publishes receipts plus an updated snapshot.
 
+The Blender add-on uses `cultcache-py` as its local mirror store. Blender writes
+typed host snapshots and command receipts through registered CultCache document
+definitions, drains command intents from the same store, and only uses loose JSON
+files as optional debug/export probes.
+
 ## Invariants
 
 - Editor hosts keep editor truth. Brokkr never becomes the canonical scene,
@@ -74,6 +79,7 @@ Derived State:
 
 - Unity package settings are adapter configuration, not Verse authority.
 - Blender add-on preferences are adapter configuration, not Verse authority.
+- Blender JSON debug exports are inspection/import probes, not mirror authority.
 - Editor selection and scene summaries are observations until command receipts
   confirm an accepted mutation.
 

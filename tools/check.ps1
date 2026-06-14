@@ -77,6 +77,12 @@ try {
     }
     & $pythonExe -m py_compile surfaces\blender\brokkr_bridge\blender_target.py surfaces\blender\brokkr_bridge\__init__.py
     Assert-NativeSuccess "Blender adapter Python compile"
+
+    $cultCachePySrc = "E:\Projects\cultcache-py\src"
+    if (Test-Path $cultCachePySrc) {
+        & $pythonExe -c "import sys; sys.path.insert(0, r'$cultCachePySrc'); sys.path.insert(0, r'surfaces\blender\brokkr_bridge'); import blender_target; blender_target._load_cultcache(r'$cultCachePySrc')"
+        Assert-NativeSuccess "Blender adapter CultCache import"
+    }
 }
 finally {
     Pop-Location

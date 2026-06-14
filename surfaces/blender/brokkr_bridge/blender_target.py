@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,9 @@ from typing import Any, Iterable
 PROVIDER_ID = "brokkr.blender_editor"
 TOOL_KIND = "blender-editor"
 DEFAULT_BROKER_URI = "cultmesh://brokkr"
-DEFAULT_MIRROR_ROOT = "//.brokkr/blender-editor"
+DEFAULT_CULTCACHE_PATH = "//.brokkr/blender-editor.cultcache.jsonl"
+DEFAULT_CULTCACHE_PY_SRC = "E:/Projects/cultcache-py/src"
+DEFAULT_DEBUG_MIRROR_ROOT = "//.brokkr/blender-editor-debug"
 
 HOST_SNAPSHOT_SCHEMA = "brokkr.blender.host_snapshot.v0"
 COMMAND_INTENT_SCHEMA = "brokkr.blender.command_intent.v0"
@@ -44,32 +47,62 @@ class BrokkrBlenderTarget:
         self.last_snapshot: dict[str, Any] | None = None
         self.last_receipt: dict[str, Any] | None = None
 
-    def resolve_mirror_root(self, mirror_root: str) -> str:
-        return self.bpy.path.abspath(mirror_root or DEFAULT_MIRROR_ROOT)
+    def resolve_cache_path(self, cache_path: str) -> str:
+        return self.bpy.path.abspath(cache_path or DEFAULT_CULTCACHE_PATH)
 
-    def publish_snapshot(self, context: Any, mirror_root: str) -> dict[str, Any]:
+    def resolve_debug_mirror_root(self, debug_mirror_root: str) -> str:
+        return self.bpy.path.abspath(debug_mirror_root or DEFAULT_DEBUG_MIRROR_ROOT)
+
+    def publish_snapshot(
+        self,
+        context: Any,
+        cache_path: str,
+        cultcache_py_src: str,
+        debug_mirror_root: str = "",
+    ) -> dict[str, Any]:
         snapshot = self.capture_snapshot(context)
-        self._write_debug_document(mirror_root, "blender/host/current.json", snapshot)
+        cache, documents = self._open_cache(cache_path, cultcache_py_src)
+        cache.put(documents["host_snapshot"], "blender/host/current", snapshot)
+        if debug_mirror_root:
+            self._write_debug_document(debug_mirror_root, "blender/host/current.json", snapshot)
         self.last_snapshot = snapshot
         return snapshot
 
-    def drain_commands(self, context: Any, mirror_root: str) -> list[dict[str, Any]]:
-        commands_root = Path(self.resolve_mirror_root(mirror_root)) / "blender" / "commands"
+    def drain_commands(
+        self,
+        context: Any,
+        cache_path: str,
+        cultcache_py_src: str,
+        debug_mirror_root: str = "",
+    ) -> list[dict[str, Any]]:
+        cache, documents = self._open_cache(cache_path, cultcache_py_src)
+        if debug_mirror_root:
+            self._import_debug_command_files(cache, documents["command_intent"], debug_mirror_root)
+
+        snapshot = cache.snapshot()
+        commands = snapshot.get(COMMAND_INTENT_SCHEMA, {})
         receipts: list[dict[str, Any]] = []
 
-        for command_path in sorted(commands_root.glob("*.json")):
-            with command_path.open("r", encoding="utf-8") as handle:
-                command = json.load(handle)
+        for command_key, command in sorted(commands.items()):
             receipt = self.execute_command(context, command)
-            self.publish_receipt(mirror_root, receipt)
-            command_path.unlink(missing_ok=True)
+            self.publish_receipt(cache_path, cultcache_py_src, receipt, debug_mirror_root)
+            cache.delete(documents["command_intent"], command_key)
             receipts.append(receipt)
 
         return receipts
 
-    def publish_receipt(self, mirror_root: str, receipt: dict[str, Any]) -> None:
+    def publish_receipt(
+        self,
+        cache_path: str,
+        cultcache_py_src: str,
+        receipt: dict[str, Any],
+        debug_mirror_root: str = "",
+    ) -> None:
         command_id = receipt.get("commandId") or uuid.uuid4().hex
-        self._write_debug_document(mirror_root, f"blender/receipts/{command_id}.json", receipt)
+        cache, documents = self._open_cache(cache_path, cultcache_py_src)
+        cache.put(documents["command_receipt"], f"blender/receipts/{command_id}", receipt)
+        if debug_mirror_root:
+            self._write_debug_document(debug_mirror_root, f"blender/receipts/{command_id}.json", receipt)
         self.last_receipt = receipt
 
     def capture_snapshot(self, context: Any) -> dict[str, Any]:
@@ -267,11 +300,55 @@ class BrokkrBlenderTarget:
             "observedAt": _now(),
         }
 
-    def _write_debug_document(self, mirror_root: str, relative_path: str, document: dict[str, Any]) -> None:
-        path = Path(self.resolve_mirror_root(mirror_root)) / relative_path
+    def _open_cache(self, cache_path: str, cultcache_py_src: str) -> tuple[Any, dict[str, Any]]:
+        cultcache = _load_cultcache(cultcache_py_src)
+        documents = {
+            "host_snapshot": cultcache.define_document_type(HOST_SNAPSHOT_SCHEMA),
+            "command_intent": cultcache.define_document_type(COMMAND_INTENT_SCHEMA),
+            "command_receipt": cultcache.define_document_type(COMMAND_RECEIPT_SCHEMA),
+        }
+        path = self.resolve_cache_path(cache_path)
+        cache = (
+            cultcache.CultCache.builder()
+            .register_registry(tuple(documents.values()))
+            .add_generic_store(cultcache.JsonLinesBackingStore(path))
+            .build()
+        )
+        cache.pull_all_backing_stores()
+        return cache, documents
+
+    def _import_debug_command_files(self, cache: Any, command_document: Any, debug_mirror_root: str) -> None:
+        commands_root = Path(self.resolve_debug_mirror_root(debug_mirror_root)) / "blender" / "commands"
+        for command_path in sorted(commands_root.glob("*.json")):
+            with command_path.open("r", encoding="utf-8") as handle:
+                command = json.load(handle)
+            command_id = command.get("commandId") or command_path.stem
+            command["schema"] = command.get("schema") or COMMAND_INTENT_SCHEMA
+            command["commandId"] = command_id
+            cache.put(command_document, f"blender/commands/{command_id}", command)
+            command_path.unlink(missing_ok=True)
+
+    def _write_debug_document(self, debug_mirror_root: str, relative_path: str, document: dict[str, Any]) -> None:
+        path = Path(self.resolve_debug_mirror_root(debug_mirror_root)) / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as handle:
             json.dump(document, handle, indent=2, sort_keys=True)
+
+
+def _load_cultcache(cultcache_py_src: str) -> Any:
+    source = Path(cultcache_py_src or DEFAULT_CULTCACHE_PY_SRC)
+    if source.exists():
+        source_text = str(source)
+        if source_text not in sys.path:
+            sys.path.insert(0, source_text)
+    try:
+        import cultcache_py  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Brokkr Blender target requires cultcache-py. Set CultCache Python Source "
+            "to the cultcache-py/src directory or install cultcache-py into Blender's Python."
+        ) from exc
+    return cultcache_py
 
 
 def _now() -> str:
