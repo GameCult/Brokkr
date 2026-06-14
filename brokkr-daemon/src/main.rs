@@ -14,6 +14,7 @@ struct ProviderAdvertisement {
     transports: Vec<Transport>,
     tool_surfaces: Vec<ToolSurface>,
     mirror_documents: Vec<MirrorDocument>,
+    sync_organ: SyncOrgan,
     realtime_routes: Vec<RealtimeRoute>,
     eve_surfaces: Vec<EveSurface>,
     command_policy: CommandPolicy,
@@ -67,6 +68,26 @@ struct MirrorDocument {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SyncOrgan {
+    id: &'static str,
+    owner: &'static str,
+    role: &'static str,
+    documents: Vec<SyncDocument>,
+    sync_var_kinds: Vec<&'static str>,
+    policies: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncDocument {
+    name: &'static str,
+    schema: &'static str,
+    owner: &'static str,
+    record_hint: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RealtimeRoute {
     id: &'static str,
     owner: &'static str,
@@ -102,8 +123,9 @@ fn main() -> Result<()> {
 
     match command.as_str() {
         "provider" | "smoke" => print_provider(),
+        "sync-contract" => print_sync_contract(),
         _ => {
-            eprintln!("usage: brokkr-daemon [provider|smoke]");
+            eprintln!("usage: brokkr-daemon [provider|smoke|sync-contract]");
             std::process::exit(2);
         }
     }
@@ -114,6 +136,11 @@ fn print_provider() -> Result<()> {
         "{}",
         serde_json::to_string_pretty(&build_provider_advertisement())?
     );
+    Ok(())
+}
+
+fn print_sync_contract() -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(&build_sync_organ())?);
     Ok(())
 }
 
@@ -157,6 +184,10 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "gameobject.create",
                     "component.attach",
                     "component.property.write",
+                    "sync.session.publish",
+                    "sync.object.bind",
+                    "sync.var.publish",
+                    "sync.timeline.bind",
                     "command.receipt.publish",
                     "eve.gui.publish",
                     "eve.tui.publish",
@@ -184,6 +215,10 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "material.assign",
                     "selection.read",
                     "selection.write",
+                    "sync.session.publish",
+                    "sync.object.bind",
+                    "sync.var.publish",
+                    "sync.timeline.bind",
                     "command.receipt.publish",
                     "eve.gui.publish",
                     "eve.tui.publish",
@@ -245,7 +280,38 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                 owner: "brokkr.blender_editor",
                 record_hint: "blender/receipts/{commandId}",
             },
+            MirrorDocument {
+                name: "Brokkr sync session",
+                schema: "brokkr.sync.session.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/sessions/{sessionId}",
+            },
+            MirrorDocument {
+                name: "Brokkr object binding",
+                schema: "brokkr.sync.object_binding.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/bindings/objects/{bindingId}",
+            },
+            MirrorDocument {
+                name: "Brokkr sync var",
+                schema: "brokkr.sync.var.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/vars/{syncVarId}",
+            },
+            MirrorDocument {
+                name: "Brokkr timeline binding",
+                schema: "brokkr.sync.timeline_binding.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/bindings/timelines/{bindingId}",
+            },
+            MirrorDocument {
+                name: "Brokkr sync receipt",
+                schema: "brokkr.sync.receipt.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/receipts/{receiptId}",
+            },
         ],
+        sync_organ: build_sync_organ(),
         realtime_routes: build_unity_quest_routes(),
         eve_surfaces: vec![
             EveSurface {
@@ -271,6 +337,64 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                 "CultCache is durable mirror truth; Brokkr provider output is discovery metadata.",
             ],
         },
+    }
+}
+
+fn build_sync_organ() -> SyncOrgan {
+    SyncOrgan {
+        id: "brokkr.sync_organ.v0",
+        owner: PROVIDER_ID,
+        role: "receipt-driven Unity/Blender correspondence and sync policy",
+        documents: vec![
+            SyncDocument {
+                name: "Sync session",
+                schema: "brokkr.sync.session.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/sessions/{sessionId}",
+            },
+            SyncDocument {
+                name: "Object binding",
+                schema: "brokkr.sync.object_binding.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/bindings/objects/{bindingId}",
+            },
+            SyncDocument {
+                name: "Sync variable",
+                schema: "brokkr.sync.var.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/vars/{syncVarId}",
+            },
+            SyncDocument {
+                name: "Timeline binding",
+                schema: "brokkr.sync.timeline_binding.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/bindings/timelines/{bindingId}",
+            },
+            SyncDocument {
+                name: "Sync receipt",
+                schema: "brokkr.sync.receipt.v0",
+                owner: PROVIDER_ID,
+                record_hint: "sync/receipts/{receiptId}",
+            },
+        ],
+        sync_var_kinds: vec![
+            "transform",
+            "active-state",
+            "material",
+            "component-property",
+            "custom-property",
+            "timeline-frame",
+            "timeline-time",
+            "animation-clip",
+            "camera-lens",
+            "cinemachine-virtual-camera",
+        ],
+        policies: vec![
+            "Editor hosts own mutations; sync records only declare correspondence and desired lanes.",
+            "Sync writes become real only after host command receipts confirm accepted mutations.",
+            "Manual, UI-triggered, and programmatic sync actions use the same sync documents.",
+            "Timeline bindings carry frame/time authority explicitly so Blender animation and Unity Cinemachine can share a clock without stealing editor ownership.",
+        ],
     }
 }
 
@@ -394,5 +518,47 @@ mod tests {
             "brokkr.blender_editor",
             "blender/receipts/{commandId}"
         )));
+    }
+
+    #[test]
+    fn provider_advertises_sync_organ_documents_and_timeline_vars() {
+        let provider = build_provider_advertisement();
+        let sync_documents: Vec<_> = provider
+            .sync_organ
+            .documents
+            .iter()
+            .map(|document| (document.schema, document.record_hint))
+            .collect();
+        let mirror_documents: Vec<_> = provider
+            .mirror_documents
+            .iter()
+            .map(|document| (document.schema, document.owner))
+            .collect();
+
+        assert_eq!(provider.sync_organ.owner, PROVIDER_ID);
+        assert!(sync_documents.contains(&("brokkr.sync.session.v0", "sync/sessions/{sessionId}")));
+        assert!(sync_documents.contains(&(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/{bindingId}"
+        )));
+        assert!(sync_documents.contains(&("brokkr.sync.var.v0", "sync/vars/{syncVarId}")));
+        assert!(sync_documents.contains(&(
+            "brokkr.sync.timeline_binding.v0",
+            "sync/bindings/timelines/{bindingId}"
+        )));
+        assert!(sync_documents.contains(&("brokkr.sync.receipt.v0", "sync/receipts/{receiptId}")));
+        assert!(mirror_documents.contains(&("brokkr.sync.var.v0", PROVIDER_ID)));
+        assert!(
+            provider
+                .sync_organ
+                .sync_var_kinds
+                .contains(&"timeline-frame")
+        );
+        assert!(
+            provider
+                .sync_organ
+                .sync_var_kinds
+                .contains(&"cinemachine-virtual-camera")
+        );
     }
 }

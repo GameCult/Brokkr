@@ -57,7 +57,7 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         name="Debug Export Root",
         subtype="DIR_PATH",
         default=DEFAULT_DEBUG_MIRROR_ROOT,
-        description="Optional JSON debug export/import root; CultCache remains the mirror owner",
+        description="Optional JSON debug export/import root; CultMesh remains the mirror owner",
     )
 
     auto_capture: bpy.props.BoolProperty(
@@ -94,6 +94,78 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Maximum encoded snapshot response size",
     )
 
+    sync_session_id: bpy.props.StringProperty(
+        name="Sync Session",
+        default="default",
+        description="Brokkr sync session id shared with Unity",
+    )
+
+    sync_display_name: bpy.props.StringProperty(
+        name="Sync Display Name",
+        default="Brokkr Editor Sync",
+        description="Human-readable Brokkr sync session label",
+    )
+
+    unity_object_id: bpy.props.StringProperty(
+        name="Unity Object Id",
+        default="",
+        description="Unity GlobalObjectId for the object bound to the active Blender object",
+    )
+
+    unity_object_path: bpy.props.StringProperty(
+        name="Unity Object Path",
+        default="",
+        description="Unity hierarchy path for the bound object",
+    )
+
+    sync_transform: bpy.props.BoolProperty(
+        name="Sync Transform",
+        default=True,
+        description="Synchronize object transforms",
+    )
+
+    sync_material: bpy.props.BoolProperty(
+        name="Sync Material",
+        default=True,
+        description="Synchronize material assignment",
+    )
+
+    sync_custom_properties: bpy.props.BoolProperty(
+        name="Sync Custom Properties",
+        default=False,
+        description="Synchronize Blender custom properties as sync vars",
+    )
+
+    unity_timeline_object_id: bpy.props.StringProperty(
+        name="Unity Timeline Object",
+        default="",
+        description="Unity object id that owns the timeline binding",
+    )
+
+    unity_cinemachine_object_id: bpy.props.StringProperty(
+        name="Unity Cinemachine Object",
+        default="",
+        description="Unity Cinemachine object id receiving camera sync",
+    )
+
+    blender_action_name: bpy.props.StringProperty(
+        name="Blender Action",
+        default="",
+        description="Blender action name for timeline sync; blank uses the active object's action",
+    )
+
+    sync_timeline_frame: bpy.props.BoolProperty(
+        name="Sync Timeline Frame",
+        default=True,
+        description="Synchronize Blender scene frame/time into the Brokkr timeline sync var",
+    )
+
+    sync_cinemachine_camera: bpy.props.BoolProperty(
+        name="Sync Cinemachine Camera",
+        default=True,
+        description="Synchronize Blender camera animation into Unity Cinemachine lanes",
+    )
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "broker_uri")
@@ -105,6 +177,18 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "serve_port")
         layout.prop(self, "max_snapshot_documents")
         layout.prop(self, "max_snapshot_bytes")
+        layout.prop(self, "sync_session_id")
+        layout.prop(self, "sync_display_name")
+        layout.prop(self, "unity_object_id")
+        layout.prop(self, "unity_object_path")
+        layout.prop(self, "sync_transform")
+        layout.prop(self, "sync_material")
+        layout.prop(self, "sync_custom_properties")
+        layout.prop(self, "unity_timeline_object_id")
+        layout.prop(self, "unity_cinemachine_object_id")
+        layout.prop(self, "blender_action_name")
+        layout.prop(self, "sync_timeline_frame")
+        layout.prop(self, "sync_cinemachine_camera")
 
 
 class BROKKR_PT_status(bpy.types.Panel):
@@ -133,6 +217,10 @@ class BROKKR_PT_status(bpy.types.Panel):
         server_row = layout.row(align=True)
         server_row.operator("brokkr.start_server", icon="NETWORK_DRIVE")
         server_row.operator("brokkr.stop_server", icon="CANCEL")
+
+        sync_row = layout.row(align=True)
+        sync_row.operator("brokkr.publish_object_sync", icon="LINKED")
+        sync_row.operator("brokkr.publish_timeline_sync", icon="TIME")
 
         if adapter.last_snapshot:
             layout.separator()
@@ -210,6 +298,52 @@ class BROKKR_OT_stop_server(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BROKKR_OT_publish_object_sync(bpy.types.Operator):
+    bl_idname = "brokkr.publish_object_sync"
+    bl_label = "Object Sync"
+    bl_description = "Publish a Brokkr object binding for the active Blender object"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        binding = target().publish_object_sync(
+            context,
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+            prefs.sync_session_id,
+            prefs.sync_display_name,
+            prefs.unity_object_id,
+            prefs.unity_object_path,
+            prefs.sync_transform,
+            prefs.sync_material,
+            prefs.sync_custom_properties,
+        )
+        self.report({"INFO"}, f"Brokkr object sync: {binding['displayName']}")
+        return {"FINISHED"}
+
+
+class BROKKR_OT_publish_timeline_sync(bpy.types.Operator):
+    bl_idname = "brokkr.publish_timeline_sync"
+    bl_label = "Timeline Sync"
+    bl_description = "Publish a Brokkr timeline binding for Blender animation and Unity Cinemachine"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        binding = target().publish_timeline_sync(
+            context,
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+            prefs.sync_session_id,
+            prefs.sync_display_name,
+            prefs.unity_timeline_object_id,
+            prefs.unity_cinemachine_object_id,
+            prefs.blender_action_name,
+            prefs.sync_timeline_frame,
+            prefs.sync_cinemachine_camera,
+        )
+        self.report({"INFO"}, f"Brokkr timeline sync: {binding['displayName']}")
+        return {"FINISHED"}
+
+
 def _auto_capture(scene, depsgraph):
     context = bpy.context
     prefs = context.preferences.addons.get(__name__)
@@ -230,6 +364,8 @@ classes = (
     BROKKR_OT_drain_commands,
     BROKKR_OT_start_server,
     BROKKR_OT_stop_server,
+    BROKKR_OT_publish_object_sync,
+    BROKKR_OT_publish_timeline_sync,
 )
 
 

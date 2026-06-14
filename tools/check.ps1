@@ -33,11 +33,20 @@ try {
     Assert-Contains $providerText '"kind": "cultmesh"' "provider advertisement"
     Assert-Contains $providerText "brokkr.unity.host_snapshot.v0" "provider advertisement"
     Assert-Contains $providerText "brokkr.unity.command_intent.v0" "provider advertisement"
+    Assert-Contains $providerText "brokkr.sync.var.v0" "provider advertisement"
+    Assert-Contains $providerText "cinemachine-virtual-camera" "provider advertisement"
     foreach ($transport in $providerJson.transports) {
         if ($transport.kind -ne "cultmesh") {
             throw "Unexpected provider transport kind: $($transport.kind)"
         }
     }
+
+    $syncContract = cargo run -p brokkr-daemon -- sync-contract
+    Assert-NativeSuccess "cargo sync-contract smoke"
+    $syncContractText = ($syncContract | Out-String)
+    Assert-Contains $syncContractText "brokkr.sync.timeline_binding.v0" "sync contract"
+    Assert-Contains $syncContractText "timeline-frame" "sync contract"
+    Assert-Contains $syncContractText "cinemachine-virtual-camera" "sync contract"
 
     $pluginRoot = Join-Path (Get-Location) "surfaces\unity\Packages\com.gamecult.brokkr\Plugins\CultMesh"
     $requiredDlls = @(

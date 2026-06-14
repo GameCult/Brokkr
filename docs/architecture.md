@@ -7,8 +7,9 @@ with Unity and Blender plugin surfaces.
 
 ## Current Mechanism
 
-Brokkr is a provider identity and editor-adapter contract. The Rust daemon emits
-the discovery document for Odin and the Verse. It does not own Unity scene
+Brokkr is a provider identity, editor-adapter contract, and sync organ contract.
+The Rust daemon emits the discovery document for Odin and the Verse. It owns
+sync correspondence and policy documents; it does not own Unity or Blender scene
 truth, command queues, or dashboard state.
 
 The Unity package opens a durable CultMesh node backed by a CultCache store at
@@ -26,6 +27,12 @@ probes. The add-on can serve the node through `CultMesh.serve_node(...)` so
 external CultNet/CultMesh clients can request schema catalogs, snapshots, shard
 logs, and raw document mutations.
 
+The sync organ owns `brokkr.sync.*` documents: sessions, object bindings, sync
+vars, timeline bindings, and receipts. Unity and Blender plugins can publish
+those records from editor UI. The daemon contract makes the correspondence
+inspectable before a later active sync loop translates sync records into host
+command intents.
+
 ## Invariants
 
 - Editor hosts keep editor truth. Brokkr never becomes the canonical scene,
@@ -34,6 +41,8 @@ logs, and raw document mutations.
   watch streams, and Verse visibility.
 - Brokkr owns provider identity, mirror schema advertisement, and discovery
   metadata.
+- Brokkr owns sync correspondence and policy records. Editor hosts still own
+  scene mutation.
 - Unity owns Unity editor mutations. A command intent is not truth until Unity
   publishes a receipt and refreshed mirror state.
 - Eve/CultUI surfaces are typed projections over the mirror, not renderer-owned
@@ -75,6 +84,11 @@ Outputs:
 - `brokkr.blender.host_snapshot.v0`
 - `brokkr.blender.command_intent.v0`
 - `brokkr.blender.command_receipt.v0`
+- `brokkr.sync.session.v0`
+- `brokkr.sync.object_binding.v0`
+- `brokkr.sync.var.v0`
+- `brokkr.sync.timeline_binding.v0`
+- `brokkr.sync.receipt.v0`
 - Eve/CultUI surface documents for host status, selection, assets, scene/object
   trees, component state, command affordances, and receipt history.
 
@@ -83,6 +97,8 @@ Derived State:
 - Unity package settings are adapter configuration, not Verse authority.
 - Blender add-on preferences are adapter configuration, not Verse authority.
 - Blender JSON debug exports are inspection/import probes, not mirror authority.
+- Unity and Blender sync UI fields are command/edit affordances; the
+  `brokkr.sync.*` documents are the shared sync policy surface.
 - Editor selection and scene summaries are observations until command receipts
   confirm an accepted mutation.
 

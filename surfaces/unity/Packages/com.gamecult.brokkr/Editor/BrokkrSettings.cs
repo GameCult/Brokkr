@@ -31,5 +31,53 @@ namespace GameCult.Brokkr.Editor
             get => EditorPrefs.GetString("GameCult.Brokkr.CultMeshCachePath", BrokkrCultMeshMirror.DefaultCachePath());
             set => EditorPrefs.SetString("GameCult.Brokkr.CultMeshCachePath", value);
         }
+
+        internal static string SyncSessionId
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.SyncSessionId", "default");
+            set => EditorPrefs.SetString("GameCult.Brokkr.SyncSessionId", value);
+        }
+
+        internal static string SyncDisplayName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.SyncDisplayName", "Brokkr Editor Sync");
+            set => EditorPrefs.SetString("GameCult.Brokkr.SyncDisplayName", value);
+        }
+
+        internal static string BlenderObjectName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.BlenderObjectName", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.BlenderObjectName", value);
+        }
+
+        internal static string BlenderCollectionName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.BlenderCollectionName", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.BlenderCollectionName", value);
+        }
+
+        internal static string BlenderSceneName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.BlenderSceneName", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.BlenderSceneName", value);
+        }
+
+        internal static string UnityTimelineObjectId
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.UnityTimelineObjectId", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.UnityTimelineObjectId", value);
+        }
+
+        internal static string UnityCinemachineObjectId
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.UnityCinemachineObjectId", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.UnityCinemachineObjectId", value);
+        }
+
+        internal static string BlenderActionName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.BlenderActionName", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.BlenderActionName", value);
+        }
     }
 }

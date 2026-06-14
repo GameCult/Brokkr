@@ -19,6 +19,11 @@ DEFAULT_DEBUG_MIRROR_ROOT = "//.brokkr/blender-editor-debug"
 HOST_SNAPSHOT_SCHEMA = "brokkr.blender.host_snapshot.v0"
 COMMAND_INTENT_SCHEMA = "brokkr.blender.command_intent.v0"
 COMMAND_RECEIPT_SCHEMA = "brokkr.blender.command_receipt.v0"
+SYNC_SESSION_SCHEMA = "brokkr.sync.session.v0"
+SYNC_OBJECT_BINDING_SCHEMA = "brokkr.sync.object_binding.v0"
+SYNC_VAR_SCHEMA = "brokkr.sync.var.v0"
+SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
+SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
 
 CAPABILITIES = (
     "cultcache.mirror.publish",
@@ -109,6 +114,95 @@ class BrokkrBlenderTarget:
         if debug_mirror_root:
             self._write_debug_document(debug_mirror_root, f"blender/receipts/{command_id}.json", receipt)
         self.last_receipt = receipt
+
+    def publish_object_sync(
+        self,
+        context: Any,
+        cache_path: str,
+        cultlib_py_src: str,
+        session_id: str,
+        display_name: str,
+        unity_object_id: str,
+        unity_path: str,
+        sync_transform: bool,
+        sync_material: bool,
+        sync_custom_properties: bool,
+    ) -> dict[str, Any]:
+        obj = context.active_object
+        if obj is None:
+            raise RuntimeError("Select a Blender object before publishing object sync.")
+
+        now = _now()
+        node, documents = self._open_node(cache_path, cultlib_py_src)
+        normalized_session_id = session_id or "default"
+        binding_id = _stable_id("object", normalized_session_id, obj.name, unity_object_id)
+        session = _sync_session(normalized_session_id, display_name, now)
+        binding = {
+            "schema": SYNC_OBJECT_BINDING_SCHEMA,
+            "bindingId": binding_id,
+            "sessionId": normalized_session_id,
+            "displayName": obj.name,
+            "unityObjectId": unity_object_id,
+            "unityPath": unity_path,
+            "blenderObjectName": obj.name,
+            "blenderCollectionName": obj.users_collection[0].name if obj.users_collection else "",
+            "enabled": True,
+            "authority": "blender-to-unity",
+            "updatedAt": now,
+        }
+
+        node.database.put(documents["sync_session"], f"sync/sessions/{normalized_session_id}", session)
+        node.database.put(documents["sync_object_binding"], f"sync/bindings/objects/{binding_id}", binding)
+        self._put_sync_var(node, documents, normalized_session_id, binding_id, "transform", "Transform", "Transform", "location,rotationEuler,scale", "blender-to-unity", sync_transform, "linear", now)
+        self._put_sync_var(node, documents, normalized_session_id, binding_id, "material", "Material", "Renderer.m_Materials", "materials", "blender-to-unity", sync_material, "step", now)
+        self._put_sync_var(node, documents, normalized_session_id, binding_id, "custom-property", "Custom Properties", "Component.Property", "customProperties", "blender-to-unity", sync_custom_properties, "step", now)
+        return binding
+
+    def publish_timeline_sync(
+        self,
+        context: Any,
+        cache_path: str,
+        cultlib_py_src: str,
+        session_id: str,
+        display_name: str,
+        unity_timeline_object_id: str,
+        unity_cinemachine_object_id: str,
+        blender_action_name: str,
+        sync_frame: bool,
+        sync_camera: bool,
+    ) -> dict[str, Any]:
+        scene = context.scene
+        if scene is None:
+            raise RuntimeError("Open a Blender scene before publishing timeline sync.")
+
+        now = _now()
+        node, documents = self._open_node(cache_path, cultlib_py_src)
+        normalized_session_id = session_id or "default"
+        action_name = blender_action_name or _active_action_name(context)
+        binding_id = _stable_id("timeline", normalized_session_id, scene.name, action_name, unity_timeline_object_id)
+        session = _sync_session(normalized_session_id, display_name, now)
+        binding = {
+            "schema": SYNC_TIMELINE_BINDING_SCHEMA,
+            "bindingId": binding_id,
+            "sessionId": normalized_session_id,
+            "displayName": action_name or scene.name,
+            "unityTimelineObjectId": unity_timeline_object_id,
+            "unityCinemachineObjectId": unity_cinemachine_object_id,
+            "blenderSceneName": scene.name,
+            "blenderActionName": action_name,
+            "clockAuthority": "blender",
+            "frameRate": float(scene.render.fps),
+            "syncFrame": bool(sync_frame),
+            "syncCamera": bool(sync_camera),
+            "enabled": bool(sync_frame or sync_camera),
+            "updatedAt": now,
+        }
+
+        node.database.put(documents["sync_session"], f"sync/sessions/{normalized_session_id}", session)
+        node.database.put(documents["sync_timeline_binding"], f"sync/bindings/timelines/{binding_id}", binding)
+        self._put_sync_var(node, documents, normalized_session_id, binding_id, "timeline-frame", "Timeline Frame", "Timeline.time", "scene.frame_current", "blender-to-unity", sync_frame, "linear", now)
+        self._put_sync_var(node, documents, normalized_session_id, binding_id, "cinemachine-virtual-camera", "Cinemachine Camera", "CinemachineVirtualCamera", "camera", "blender-to-unity", sync_camera, "linear", now)
+        return binding
 
     def start_server(
         self,
@@ -404,6 +498,11 @@ class BrokkrBlenderTarget:
             "host_snapshot": cultcache.define_document_type(HOST_SNAPSHOT_SCHEMA),
             "command_intent": cultcache.define_document_type(COMMAND_INTENT_SCHEMA),
             "command_receipt": cultcache.define_document_type(COMMAND_RECEIPT_SCHEMA),
+            "sync_session": cultcache.define_document_type(SYNC_SESSION_SCHEMA),
+            "sync_object_binding": cultcache.define_document_type(SYNC_OBJECT_BINDING_SCHEMA),
+            "sync_var": cultcache.define_document_type(SYNC_VAR_SCHEMA),
+            "sync_timeline_binding": cultcache.define_document_type(SYNC_TIMELINE_BINDING_SCHEMA),
+            "sync_receipt": cultcache.define_document_type(SYNC_RECEIPT_SCHEMA),
         }
         node = cultmesh.CultMesh.start_node(path, runtime_id=runtime_id)
         for document in documents.values():
@@ -431,6 +530,37 @@ class BrokkrBlenderTarget:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as handle:
             json.dump(document, handle, indent=2, sort_keys=True)
+
+    def _put_sync_var(
+        self,
+        node: Any,
+        documents: dict[str, Any],
+        session_id: str,
+        binding_id: str,
+        kind: str,
+        display_name: str,
+        unity_property_path: str,
+        blender_property_path: str,
+        authority: str,
+        enabled: bool,
+        interpolation: str,
+        updated_at: str,
+    ) -> None:
+        sync_var_id = _stable_id("var", session_id, binding_id, kind)
+        node.database.put(documents["sync_var"], f"sync/vars/{sync_var_id}", {
+            "schema": SYNC_VAR_SCHEMA,
+            "syncVarId": sync_var_id,
+            "sessionId": session_id,
+            "bindingId": binding_id,
+            "displayName": display_name,
+            "kind": kind,
+            "unityPropertyPath": unity_property_path,
+            "blenderPropertyPath": blender_property_path,
+            "authority": authority,
+            "enabled": bool(enabled),
+            "interpolation": interpolation,
+            "updatedAt": updated_at,
+        })
 
 
 def _load_cultmesh(cultlib_py_src: str) -> tuple[Any, Any]:
@@ -477,3 +607,29 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
     return str(value)
+
+
+def _sync_session(session_id: str, display_name: str, updated_at: str) -> dict[str, Any]:
+    return {
+        "schema": SYNC_SESSION_SCHEMA,
+        "sessionId": session_id,
+        "displayName": display_name or "Brokkr Editor Sync",
+        "owner": "brokkr.creative_tool_broker",
+        "unityProviderId": "brokkr.unity_editor",
+        "blenderProviderId": PROVIDER_ID,
+        "mode": "manual",
+        "enabled": True,
+        "createdAt": updated_at,
+        "updatedAt": updated_at,
+    }
+
+
+def _stable_id(*parts: str) -> str:
+    return ":".join(str(part or "").replace(" ", "_").replace("/", "_").replace("\\", "_") for part in parts)
+
+
+def _active_action_name(context: Any) -> str:
+    obj = context.active_object
+    if obj is not None and obj.animation_data and obj.animation_data.action:
+        return obj.animation_data.action.name
+    return ""

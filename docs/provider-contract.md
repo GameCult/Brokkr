@@ -40,6 +40,30 @@ Primary Eve surface id: `brokkr.eve.tool_broker.v0`
 - `brokkr.blender.host_snapshot.v0` at `blender/host/current`
 - `brokkr.blender.command_intent.v0` at `blender/commands/{commandId}`
 - `brokkr.blender.command_receipt.v0` at `blender/receipts/{commandId}`
+- `brokkr.sync.session.v0` at `sync/sessions/{sessionId}`
+- `brokkr.sync.object_binding.v0` at `sync/bindings/objects/{bindingId}`
+- `brokkr.sync.var.v0` at `sync/vars/{syncVarId}`
+- `brokkr.sync.timeline_binding.v0` at `sync/bindings/timelines/{bindingId}`
+- `brokkr.sync.receipt.v0` at `sync/receipts/{receiptId}`
+
+## Sync Organ
+
+Brokkr owns sync correspondence and policy documents. Editor hosts still own
+scene mutation. A sync record can request or describe a lane, but it is not real
+editor state until Unity or Blender publishes accepted command receipts and a
+fresh host snapshot.
+
+Primary sync documents:
+
+- `brokkr.sync.session.v0`: shared sync session and mode.
+- `brokkr.sync.object_binding.v0`: Unity GameObject to Blender object/collection
+  correspondence.
+- `brokkr.sync.var.v0`: per-lane sync options such as transform, material,
+  component property, custom property, timeline frame, camera lens, or
+  Cinemachine virtual camera.
+- `brokkr.sync.timeline_binding.v0`: Blender scene/action timeline to Unity
+  Timeline/Cinemachine correspondence.
+- `brokkr.sync.receipt.v0`: daemon sync pass receipts.
 
 ## Unity Command Actions
 

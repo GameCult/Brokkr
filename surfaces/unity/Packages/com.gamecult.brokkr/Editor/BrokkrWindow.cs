@@ -16,6 +16,21 @@ namespace GameCult.Brokkr.Editor
         private MessageType lastMessageType = MessageType.Info;
         private double nextPollAt;
         private BrokkrCultMeshMirror mirror;
+        private string syncSessionId = "default";
+        private string syncDisplayName = "Brokkr Editor Sync";
+        private string blenderObjectName = "";
+        private string blenderCollectionName = "";
+        private bool syncObjectEnabled = true;
+        private bool syncTransform = true;
+        private bool syncActiveState = true;
+        private bool syncMaterial;
+        private bool syncTimelineFrame = true;
+        private bool syncCinemachineCamera = true;
+        private float syncTimelineFrameRate = 24.0f;
+        private string unityTimelineObjectId = "";
+        private string unityCinemachineObjectId = "";
+        private string blenderSceneName = "";
+        private string blenderActionName = "";
 
         [MenuItem("GameCult/Brokkr")]
         public static void Open()
@@ -29,6 +44,14 @@ namespace GameCult.Brokkr.Editor
             cultMeshCachePath = BrokkrSettings.CultMeshCachePath;
             autoPublish = BrokkrSettings.AutoPublish;
             autoPollCommands = BrokkrSettings.AutoPollCommands;
+            syncSessionId = BrokkrSettings.SyncSessionId;
+            syncDisplayName = BrokkrSettings.SyncDisplayName;
+            blenderObjectName = BrokkrSettings.BlenderObjectName;
+            blenderCollectionName = BrokkrSettings.BlenderCollectionName;
+            unityTimelineObjectId = BrokkrSettings.UnityTimelineObjectId;
+            unityCinemachineObjectId = BrokkrSettings.UnityCinemachineObjectId;
+            blenderSceneName = BrokkrSettings.BlenderSceneName;
+            blenderActionName = BrokkrSettings.BlenderActionName;
             Selection.selectionChanged += Repaint;
             EditorSceneManagerBridge.SceneDirtied += OnEditorSignal;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
@@ -60,6 +83,14 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.CultMeshCachePath = cultMeshCachePath;
                 BrokkrSettings.AutoPublish = autoPublish;
                 BrokkrSettings.AutoPollCommands = autoPollCommands;
+                BrokkrSettings.SyncSessionId = syncSessionId;
+                BrokkrSettings.SyncDisplayName = syncDisplayName;
+                BrokkrSettings.BlenderObjectName = blenderObjectName;
+                BrokkrSettings.BlenderCollectionName = blenderCollectionName;
+                BrokkrSettings.UnityTimelineObjectId = unityTimelineObjectId;
+                BrokkrSettings.UnityCinemachineObjectId = unityCinemachineObjectId;
+                BrokkrSettings.BlenderSceneName = blenderSceneName;
+                BrokkrSettings.BlenderActionName = blenderActionName;
                 SetStatus("Settings saved.", MessageType.Info);
             }
 
@@ -103,6 +134,65 @@ namespace GameCult.Brokkr.Editor
                 EditorGUILayout.LabelField("Assets", lastSnapshot.assetCount.ToString());
                 EditorGUILayout.LabelField("Scene Objects", lastSnapshot.sceneObjects.Length.ToString());
                 EditorGUILayout.LabelField("Selection", string.Join(", ", lastSnapshot.selectedObjectNames));
+            }
+
+            DrawSyncSection();
+        }
+
+        private void DrawSyncSection()
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Brokkr Sync", EditorStyles.boldLabel);
+            syncSessionId = EditorGUILayout.TextField("Session Id", syncSessionId);
+            syncDisplayName = EditorGUILayout.TextField("Display Name", syncDisplayName);
+            blenderObjectName = EditorGUILayout.TextField("Blender Object", blenderObjectName);
+            blenderCollectionName = EditorGUILayout.TextField("Blender Collection", blenderCollectionName);
+            syncObjectEnabled = EditorGUILayout.Toggle("Enable Object Binding", syncObjectEnabled);
+            syncTransform = EditorGUILayout.Toggle("Sync Transform", syncTransform);
+            syncActiveState = EditorGUILayout.Toggle("Sync Active State", syncActiveState);
+            syncMaterial = EditorGUILayout.Toggle("Sync Material", syncMaterial);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Use Selected Object Name"))
+                {
+                    var selected = Selection.activeGameObject;
+                    if (selected != null)
+                    {
+                        blenderObjectName = selected.name;
+                    }
+                }
+
+                if (GUILayout.Button("Publish Object Sync"))
+                {
+                    PublishSelectedObjectSync();
+                }
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Timeline / Cinemachine", EditorStyles.boldLabel);
+            unityTimelineObjectId = EditorGUILayout.TextField("Unity Timeline Object", unityTimelineObjectId);
+            unityCinemachineObjectId = EditorGUILayout.TextField("Unity Cinemachine Object", unityCinemachineObjectId);
+            blenderSceneName = EditorGUILayout.TextField("Blender Scene", blenderSceneName);
+            blenderActionName = EditorGUILayout.TextField("Blender Action", blenderActionName);
+            syncTimelineFrameRate = EditorGUILayout.FloatField("Frame Rate", syncTimelineFrameRate);
+            syncTimelineFrame = EditorGUILayout.Toggle("Sync Timeline Frame", syncTimelineFrame);
+            syncCinemachineCamera = EditorGUILayout.Toggle("Sync Cinemachine Camera", syncCinemachineCamera);
+
+            if (GUILayout.Button("Publish Timeline Sync"))
+            {
+                PublishTimelineSync();
+            }
+
+            if (GUILayout.Button("Use Selected For Timeline/Cinemachine"))
+            {
+                var selected = Selection.activeGameObject;
+                if (selected != null)
+                {
+                    var selectedId = BrokkrUnitySnapshotBuilder.GetObjectId(selected);
+                    unityTimelineObjectId = selectedId;
+                    unityCinemachineObjectId = selectedId;
+                }
             }
         }
 
@@ -170,6 +260,152 @@ namespace GameCult.Brokkr.Editor
             {
                 SetStatus(error.Message, MessageType.Error);
             }
+        }
+
+        private void PublishSelectedObjectSync()
+        {
+            try
+            {
+                RequireMirror();
+                var selected = Selection.activeGameObject;
+                if (selected == null)
+                {
+                    throw new InvalidOperationException("Select a Unity GameObject before publishing object sync.");
+                }
+
+                var now = DateTime.UtcNow.ToString("O");
+                var sessionId = NormalizedSyncSessionId();
+                var session = BuildSyncSession(now);
+                var bindingId = StableId("object", sessionId, BrokkrUnitySnapshotBuilder.GetObjectId(selected));
+                var binding = new BrokkrSyncObjectBinding
+                {
+                    bindingId = bindingId,
+                    sessionId = sessionId,
+                    displayName = selected.name,
+                    unityObjectId = BrokkrUnitySnapshotBuilder.GetObjectId(selected),
+                    unityPath = BuildTransformPath(selected.transform),
+                    blenderObjectName = string.IsNullOrWhiteSpace(blenderObjectName) ? selected.name : blenderObjectName,
+                    blenderCollectionName = blenderCollectionName,
+                    enabled = syncObjectEnabled,
+                    authority = "unity-to-blender",
+                    updatedAt = now
+                };
+
+                mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
+                mirror.PublishSyncObjectBindingAsync(binding).GetAwaiter().GetResult();
+                PublishSyncVar(bindingId, "transform", "Transform", "m_LocalPosition,m_LocalRotation,m_LocalScale", "location,rotationEuler,scale", syncTransform, "linear", now);
+                PublishSyncVar(bindingId, "active-state", "Active State", "m_IsActive", "visible", syncActiveState, "step", now);
+                PublishSyncVar(bindingId, "material", "Material", "Renderer.m_Materials", "materials", syncMaterial, "step", now);
+                SetStatus($"Published Brokkr object sync binding: {binding.displayName}", MessageType.Info);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private void PublishTimelineSync()
+        {
+            try
+            {
+                RequireMirror();
+                var now = DateTime.UtcNow.ToString("O");
+                var selected = Selection.activeGameObject;
+                var selectedId = selected != null ? BrokkrUnitySnapshotBuilder.GetObjectId(selected) : "";
+                var sessionId = NormalizedSyncSessionId();
+                var session = BuildSyncSession(now);
+                var timelineObjectId = string.IsNullOrWhiteSpace(unityTimelineObjectId) ? selectedId : unityTimelineObjectId;
+                var cinemachineObjectId = string.IsNullOrWhiteSpace(unityCinemachineObjectId) ? selectedId : unityCinemachineObjectId;
+                var bindingId = StableId("timeline", sessionId, timelineObjectId, blenderSceneName, blenderActionName);
+                var binding = new BrokkrSyncTimelineBinding
+                {
+                    bindingId = bindingId,
+                    sessionId = sessionId,
+                    displayName = string.IsNullOrWhiteSpace(blenderActionName) ? "Timeline Sync" : blenderActionName,
+                    unityTimelineObjectId = timelineObjectId,
+                    unityCinemachineObjectId = cinemachineObjectId,
+                    blenderSceneName = blenderSceneName,
+                    blenderActionName = blenderActionName,
+                    clockAuthority = "blender",
+                    frameRate = syncTimelineFrameRate,
+                    syncFrame = syncTimelineFrame,
+                    syncCamera = syncCinemachineCamera,
+                    enabled = syncTimelineFrame || syncCinemachineCamera,
+                    updatedAt = now
+                };
+
+                mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
+                mirror.PublishTimelineBindingAsync(binding).GetAwaiter().GetResult();
+                PublishSyncVar(bindingId, "timeline-frame", "Timeline Frame", "Timeline.time", "scene.frame_current", syncTimelineFrame, "linear", now);
+                PublishSyncVar(bindingId, "cinemachine-virtual-camera", "Cinemachine Camera", "CinemachineVirtualCamera", "camera", syncCinemachineCamera, "linear", now);
+                SetStatus($"Published Brokkr timeline sync binding: {binding.displayName}", MessageType.Info);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private BrokkrSyncSession BuildSyncSession(string observedAt)
+        {
+            return new BrokkrSyncSession
+            {
+                sessionId = NormalizedSyncSessionId(),
+                displayName = string.IsNullOrWhiteSpace(syncDisplayName) ? "Brokkr Editor Sync" : syncDisplayName,
+                mode = "manual",
+                enabled = true,
+                createdAt = observedAt,
+                updatedAt = observedAt
+            };
+        }
+
+        private void PublishSyncVar(
+            string bindingId,
+            string kind,
+            string displayName,
+            string unityPropertyPath,
+            string blenderPropertyPath,
+            bool enabled,
+            string interpolation,
+            string updatedAt)
+        {
+            var syncVar = new BrokkrSyncVar
+            {
+                syncVarId = StableId("var", NormalizedSyncSessionId(), bindingId, kind),
+                sessionId = NormalizedSyncSessionId(),
+                bindingId = bindingId,
+                displayName = displayName,
+                kind = kind,
+                unityPropertyPath = unityPropertyPath,
+                blenderPropertyPath = blenderPropertyPath,
+                authority = kind.StartsWith("timeline", StringComparison.Ordinal) ? "blender-to-unity" : "unity-to-blender",
+                enabled = enabled,
+                interpolation = interpolation,
+                updatedAt = updatedAt
+            };
+            mirror.PublishSyncVarAsync(syncVar).GetAwaiter().GetResult();
+        }
+
+        private static string BuildTransformPath(Transform transform)
+        {
+            var path = transform.name;
+            while (transform.parent != null)
+            {
+                transform = transform.parent;
+                path = $"{transform.name}/{path}";
+            }
+
+            return path;
+        }
+
+        private static string StableId(params string[] parts)
+        {
+            return string.Join(":", parts).Replace(" ", "_").Replace("/", "_").Replace("\\", "_");
+        }
+
+        private string NormalizedSyncSessionId()
+        {
+            return string.IsNullOrWhiteSpace(syncSessionId) ? "default" : syncSessionId;
         }
 
         private void OnEditorSignal()

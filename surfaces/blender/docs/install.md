@@ -27,7 +27,7 @@ a stable endpoint. The panel reports the active `cultnet://host:port` endpoint
 after `Start Server`.
 
 `Debug Export Root` may still emit readable JSON probe files under
-`.brokkr/blender-editor-debug`, but those files are debug/import glue. CultCache
+`.brokkr/blender-editor-debug`, but those files are debug/import glue. CultMesh
 owns the mirror state.
 
 ## Local Smoke
@@ -44,6 +44,10 @@ owns the mirror state.
 8. Click `Start Server`.
 9. Use the reported `cultnet://host:port` endpoint from a CultMesh/CultNet
    client to read snapshots or write command intents.
+10. Select a Blender object and click `Object Sync` to publish a
+    `brokkr.sync.object_binding.v0` plus per-lane `brokkr.sync.var.v0` records.
+11. Click `Timeline Sync` to publish a `brokkr.sync.timeline_binding.v0` for
+    Blender frame/action data and Unity Timeline/Cinemachine lanes.
 
 Admitted command actions:
 

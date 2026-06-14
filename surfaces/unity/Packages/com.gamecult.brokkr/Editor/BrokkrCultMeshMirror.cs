@@ -74,6 +74,34 @@ namespace GameCult.Brokkr.Editor
             await node.FlushAsync(soft: true);
         }
 
+        internal async Task PublishSyncSessionAsync(BrokkrSyncSession session)
+        {
+            RequireRunning();
+            await node.Database.PutAsync(new CultRecordKey($"sync/sessions/{session.sessionId}"), session);
+            await node.FlushAsync(soft: true);
+        }
+
+        internal async Task PublishSyncObjectBindingAsync(BrokkrSyncObjectBinding binding)
+        {
+            RequireRunning();
+            await node.Database.PutAsync(new CultRecordKey($"sync/bindings/objects/{binding.bindingId}"), binding);
+            await node.FlushAsync(soft: true);
+        }
+
+        internal async Task PublishSyncVarAsync(BrokkrSyncVar syncVar)
+        {
+            RequireRunning();
+            await node.Database.PutAsync(new CultRecordKey($"sync/vars/{syncVar.syncVarId}"), syncVar);
+            await node.FlushAsync(soft: true);
+        }
+
+        internal async Task PublishTimelineBindingAsync(BrokkrSyncTimelineBinding binding)
+        {
+            RequireRunning();
+            await node.Database.PutAsync(new CultRecordKey($"sync/bindings/timelines/{binding.bindingId}"), binding);
+            await node.FlushAsync(soft: true);
+        }
+
         internal bool TryDequeueCommand(out BrokkrUnityCommand command)
         {
             if (commandQueue.Count > 0)

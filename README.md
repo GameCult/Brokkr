@@ -44,6 +44,17 @@ cargo run -p brokkr-daemon -- provider
 The first smoke prints the typed provider advertisement. That is deliberately
 small: discovery shape first, live sockets second.
 
+## Sync Contract
+
+```powershell
+cargo run -p brokkr-daemon -- sync-contract
+```
+
+The sync contract advertises Brokkr-owned sessions, object bindings, sync vars,
+timeline bindings, and receipts. Unity and Blender editor plugins publish those
+documents through CultMesh so a daemon sync loop can translate them into
+host-owned command intents without stealing scene truth.
+
 ## Unity Smoke
 
 ```powershell
