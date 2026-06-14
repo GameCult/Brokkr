@@ -65,6 +65,25 @@ Primary sync documents:
   Timeline/Cinemachine correspondence.
 - `brokkr.sync.receipt.v0`: daemon sync pass receipts.
 
+Operational commands:
+
+- `brokkr-daemon sync-once --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp`
+- `brokkr-daemon sync-loop --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp --interval-ms 500`
+
+`sync-loop` owns scheduling only. It repeatedly invokes the same sync decision
+primitive as `sync-once`, writes command intents and sync receipts through the
+mirrors, and prints per-pass telemetry to stdout.
+
+Implemented sync lanes:
+
+- Unity GameObject transform to Blender object transform.
+- Unity GameObject active state to Blender object visibility.
+- Blender object transform to Unity GameObject transform.
+- Blender scene frame to Unity timeline time through `setComponentProperty`.
+- Blender scene camera transform/FOV to a Unity Cinemachine virtual camera
+  GameObject/component. The FOV write uses `componentType =
+  Cinemachine.CinemachineVirtualCamera` and property path `m_Lens.FieldOfView`.
+
 ## Unity Command Actions
 
 All Unity writes use `brokkr.unity.command_intent.v0` and receive
@@ -79,7 +98,9 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 
 Unity owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Unity executes recognized intents and publishes
-receipts.
+receipts. `setComponentProperty` writes the target object by default; when
+`componentType` is present, Unity resolves that component on the target
+GameObject and writes the serialized property there.
 
 ## Blender Command Actions
 
@@ -89,6 +110,7 @@ All Blender writes use `brokkr.blender.command_intent.v0` and receive
 - `createObject`
 - `deleteObject`
 - `setObjectTransform`
+- `setObjectVisibility`
 - `selectObject`
 - `assignMaterial`
 

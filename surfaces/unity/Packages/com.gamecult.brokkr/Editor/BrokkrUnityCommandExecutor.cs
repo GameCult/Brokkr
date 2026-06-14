@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using GameCult.Brokkr;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -62,7 +63,7 @@ namespace GameCult.Brokkr.Editor
 
         private static BrokkrUnityCommandReceipt SetComponentProperty(BrokkrUnityCommand command)
         {
-            var target = BrokkrUnitySnapshotBuilder.ResolveObjectId(command.targetObjectId);
+            var target = ResolveSerializedTarget(command);
             if (target == null)
             {
                 return Failed(command, "Target object was not found.");
@@ -85,6 +86,10 @@ namespace GameCult.Brokkr.Editor
             if (target is Component component)
             {
                 EditorSceneManager.MarkSceneDirty(component.gameObject.scene);
+            }
+            else if (target is GameObject gameObject)
+            {
+                EditorSceneManager.MarkSceneDirty(gameObject.scene);
             }
 
             return Accepted(command, "Serialized property updated.", command.targetObjectId);
@@ -185,6 +190,52 @@ namespace GameCult.Brokkr.Editor
                 Component component => component.gameObject,
                 _ => null
             };
+        }
+
+        private static UnityEngine.Object ResolveSerializedTarget(BrokkrUnityCommand command)
+        {
+            var target = BrokkrUnitySnapshotBuilder.ResolveObjectId(command.targetObjectId);
+            if (target == null || string.IsNullOrWhiteSpace(command.componentType))
+            {
+                return target;
+            }
+
+            if (target is Component component && TypeMatches(component.GetType(), command.componentType))
+            {
+                return component;
+            }
+
+            var gameObject = target switch
+            {
+                GameObject direct => direct,
+                Component owner => owner.gameObject,
+                _ => null
+            };
+            if (gameObject == null)
+            {
+                return null;
+            }
+
+            var requestedType = BrokkrUnitySnapshotBuilder.ResolveType(command.componentType);
+            if (requestedType != null && typeof(Component).IsAssignableFrom(requestedType))
+            {
+                var typedComponent = gameObject.GetComponent(requestedType);
+                if (typedComponent != null)
+                {
+                    return typedComponent;
+                }
+            }
+
+            return gameObject
+                .GetComponents<Component>()
+                .FirstOrDefault(candidate => candidate != null && TypeMatches(candidate.GetType(), command.componentType));
+        }
+
+        private static bool TypeMatches(Type type, string requestedType)
+        {
+            return string.Equals(type.FullName, requestedType, StringComparison.Ordinal)
+                || string.Equals(type.Name, requestedType, StringComparison.Ordinal)
+                || string.Equals(type.AssemblyQualifiedName, requestedType, StringComparison.Ordinal);
         }
 
         private static void AttachParent(GameObject gameObject, string parentObjectId)

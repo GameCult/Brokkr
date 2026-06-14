@@ -441,8 +441,18 @@ class BrokkrBlenderTarget:
             "materials": [slot.material.name for slot in obj.material_slots if slot.material],
             "modifiers": [self._modifier_snapshot(modifier) for modifier in obj.modifiers],
             "constraints": [constraint.name for constraint in obj.constraints],
+            "camera": self._camera_snapshot(data) if obj.type == "CAMERA" and data else None,
             "mesh": self._mesh_snapshot(data) if obj.type == "MESH" and data else None,
             "customProperties": self._custom_properties(obj.items()),
+        }
+
+    def _camera_snapshot(self, camera: Any) -> dict[str, Any]:
+        return {
+            "lensMillimeters": float(camera.lens),
+            "fieldOfViewDegrees": math.degrees(float(camera.angle)),
+            "clipStart": float(camera.clip_start),
+            "clipEnd": float(camera.clip_end),
+            "type": camera.type,
         }
 
     def _mesh_snapshot(self, mesh: Any) -> dict[str, Any]:

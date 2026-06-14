@@ -3,7 +3,10 @@ use cultcache_rs::{CacheBackingStore, CultCacheEnvelope, SingleFileMessagePackBa
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 const PROVIDER_SCHEMA: &str = "gamecult.brokkr.provider_advertisement.v0";
 const PROVIDER_ID: &str = "brokkr.creative_tool_broker";
@@ -129,9 +132,10 @@ fn main() -> Result<()> {
         "provider" | "smoke" => print_provider(),
         "sync-contract" => print_sync_contract(),
         "sync-once" => sync_once(SyncArgs::parse(args.collect())?),
+        "sync-loop" => sync_loop(SyncLoopArgs::parse(args.collect())?),
         _ => {
             eprintln!(
-                "usage: brokkr-daemon [provider|smoke|sync-contract|sync-once --unity-cache PATH --blender-cache PATH [--dry-run]]"
+                "usage: brokkr-daemon [provider|smoke|sync-contract|sync-once --unity-cache PATH --blender-cache PATH [--dry-run]|sync-loop --unity-cache PATH --blender-cache PATH [--interval-ms N] [--max-passes N] [--dry-run]]"
             );
             std::process::exit(2);
         }
@@ -155,6 +159,25 @@ fn sync_once(args: SyncArgs) -> Result<()> {
     let report = run_sync_once(&args)?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
+}
+
+fn sync_loop(args: SyncLoopArgs) -> Result<()> {
+    let mut pass_count = 0usize;
+    loop {
+        pass_count += 1;
+        let report = run_sync_once(&args.sync)?;
+        println!("{}", serde_json::to_string(&report)?);
+        io::stdout().flush()?;
+
+        if args
+            .max_passes
+            .is_some_and(|max_passes| pass_count >= max_passes)
+        {
+            return Ok(());
+        }
+
+        thread::sleep(Duration::from_millis(args.interval_ms));
+    }
 }
 
 fn build_provider_advertisement() -> ProviderAdvertisement {
@@ -464,32 +487,98 @@ struct SyncArgs {
 
 impl SyncArgs {
     fn parse(args: Vec<String>) -> Result<Self> {
-        let mut unity_cache = None;
-        let mut blender_cache = None;
-        let mut dry_run = false;
+        let parsed = ParsedSyncCli::parse(args, false)?;
+        parsed.sync_args()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SyncLoopArgs {
+    sync: SyncArgs,
+    interval_ms: u64,
+    max_passes: Option<usize>,
+}
+
+impl SyncLoopArgs {
+    fn parse(args: Vec<String>) -> Result<Self> {
+        let parsed = ParsedSyncCli::parse(args, true)?;
+        let interval_ms = parsed.interval_ms.unwrap_or(500);
+        let max_passes = parsed.max_passes;
+        Ok(Self {
+            sync: parsed.sync_args()?,
+            interval_ms,
+            max_passes,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ParsedSyncCli {
+    unity_cache: Option<PathBuf>,
+    blender_cache: Option<PathBuf>,
+    dry_run: bool,
+    interval_ms: Option<u64>,
+    max_passes: Option<usize>,
+}
+
+impl ParsedSyncCli {
+    fn parse(args: Vec<String>, allow_loop_options: bool) -> Result<Self> {
+        let mut parsed = Self {
+            unity_cache: None,
+            blender_cache: None,
+            dry_run: false,
+            interval_ms: None,
+            max_passes: None,
+        };
         let mut index = 0;
 
         while index < args.len() {
             match args[index].as_str() {
                 "--unity-cache" => {
                     index += 1;
-                    unity_cache = args.get(index).map(PathBuf::from);
+                    parsed.unity_cache = args.get(index).map(PathBuf::from);
                 }
                 "--blender-cache" => {
                     index += 1;
-                    blender_cache = args.get(index).map(PathBuf::from);
+                    parsed.blender_cache = args.get(index).map(PathBuf::from);
                 }
-                "--dry-run" => dry_run = true,
-                other => return Err(anyhow!("unknown sync-once argument: {other}")),
+                "--dry-run" => parsed.dry_run = true,
+                "--interval-ms" if allow_loop_options => {
+                    index += 1;
+                    let value = args
+                        .get(index)
+                        .ok_or_else(|| anyhow!("--interval-ms requires a value"))?;
+                    parsed.interval_ms = Some(value.parse().with_context(|| {
+                        format!("failed to parse --interval-ms value: {value}")
+                    })?);
+                }
+                "--max-passes" if allow_loop_options => {
+                    index += 1;
+                    let value = args
+                        .get(index)
+                        .ok_or_else(|| anyhow!("--max-passes requires a value"))?;
+                    parsed.max_passes =
+                        Some(value.parse().with_context(|| {
+                            format!("failed to parse --max-passes value: {value}")
+                        })?);
+                }
+                other => return Err(anyhow!("unknown sync argument: {other}")),
             }
             index += 1;
         }
 
-        Ok(Self {
-            unity_cache: unity_cache.ok_or_else(|| anyhow!("sync-once requires --unity-cache"))?,
-            blender_cache: blender_cache
-                .ok_or_else(|| anyhow!("sync-once requires --blender-cache"))?,
-            dry_run,
+        Ok(parsed)
+    }
+
+    fn sync_args(self) -> Result<SyncArgs> {
+        Ok(SyncArgs {
+            unity_cache: self
+                .unity_cache
+                .ok_or_else(|| anyhow!("sync requires --unity-cache"))?,
+            blender_cache: self
+                .blender_cache
+                .ok_or_else(|| anyhow!("sync requires --blender-cache"))?,
+            dry_run: self.dry_run,
         })
     }
 }
@@ -567,17 +656,20 @@ struct UnityObject {
 #[derive(Debug, Clone)]
 struct BlenderObject {
     name: String,
+    object_type: String,
     location: Vec<f64>,
     rotation_euler: Vec<f64>,
     scale: Vec<f64>,
     visible: bool,
     materials: Vec<String>,
+    camera_field_of_view_degrees: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
 struct BlenderTimeline {
     scene_name: String,
     frame_current: i64,
+    camera_name: String,
 }
 
 fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
@@ -764,12 +856,21 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
     }
 
     for timeline in timeline_bindings.iter().filter(|binding| binding.enabled) {
+        if !timeline.clock_authority.eq_ignore_ascii_case("blender") {
+            report.messages.push(format!(
+                "timeline binding {} requested clockAuthority={} but Brokkr currently implements Blender-authored timeline sync",
+                timeline.binding_id, timeline.clock_authority
+            ));
+            continue;
+        }
+
+        let timeline_source = blender_timeline
+            .iter()
+            .find(|candidate| candidate.scene_name == timeline.blender_scene_name)
+            .or_else(|| blender_timeline.first());
+
         if timeline.sync_frame {
-            let Some(source) = blender_timeline
-                .iter()
-                .find(|candidate| candidate.scene_name == timeline.blender_scene_name)
-                .or_else(|| blender_timeline.first())
-            else {
+            let Some(source) = timeline_source else {
                 report.messages.push(
                     "timeline sync requested but no Blender scene snapshot is available"
                         .to_string(),
@@ -779,6 +880,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
             let command_id = stable_id([
                 "sync",
                 &timeline.binding_id,
+                &timeline.blender_action_name,
                 "timeline-frame",
                 &source.frame_current.to_string(),
             ]);
@@ -786,6 +888,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
             let command = unity_property_command(
                 &command_id,
                 &timeline.unity_timeline_object_id,
+                "",
                 "m_Time",
                 &format!("{seconds:.6}"),
             );
@@ -800,14 +903,75 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
         }
 
         if timeline.sync_camera {
-            report.messages.push(format!(
-                "Cinemachine syncvar is visible for binding {} session={} unityCamera={} blenderAction={} clockAuthority={} but camera lens/body mapping still needs a Cinemachine-specific command writer",
-                timeline.binding_id,
-                timeline.session_id,
-                timeline.unity_cinemachine_object_id,
-                timeline.blender_action_name,
-                timeline.clock_authority
-            ));
+            let Some(source_scene) = timeline_source else {
+                report.messages.push(
+                    "Cinemachine sync requested but no Blender scene snapshot is available"
+                        .to_string(),
+                );
+                continue;
+            };
+            let Some(source_camera) = blender_objects.get(&source_scene.camera_name) else {
+                report.messages.push(format!(
+                    "Cinemachine sync requested for binding {} but Blender scene {} has no camera object named {}",
+                    timeline.binding_id, source_scene.scene_name, source_scene.camera_name
+                ));
+                continue;
+            };
+
+            let transform_command_id = stable_id([
+                "sync",
+                &timeline.binding_id,
+                &timeline.blender_action_name,
+                "cinemachine-camera-transform",
+            ]);
+            if emitted_command_ids.insert(transform_command_id.clone()) {
+                let command = unity_transform_command(
+                    &transform_command_id,
+                    &timeline.unity_cinemachine_object_id,
+                    &source_camera.location,
+                    &source_camera.rotation_euler,
+                    &source_camera.scale,
+                );
+                if !args.dry_run {
+                    unity_store.put_messagepack_document(
+                        "brokkr.unity.command_intent.v0",
+                        &format!("unity/commands/{transform_command_id}"),
+                        &command,
+                    )?;
+                }
+                report.unity_commands_written += 1;
+            }
+
+            if let Some(field_of_view) = source_camera.camera_field_of_view_degrees {
+                let lens_command_id = stable_id([
+                    "sync",
+                    &timeline.binding_id,
+                    &timeline.blender_action_name,
+                    "cinemachine-camera-fov",
+                ]);
+                if emitted_command_ids.insert(lens_command_id.clone()) {
+                    let command = unity_property_command(
+                        &lens_command_id,
+                        &timeline.unity_cinemachine_object_id,
+                        "Cinemachine.CinemachineVirtualCamera",
+                        "m_Lens.FieldOfView",
+                        &format!("{field_of_view:.6}"),
+                    );
+                    if !args.dry_run {
+                        unity_store.put_messagepack_document(
+                            "brokkr.unity.command_intent.v0",
+                            &format!("unity/commands/{lens_command_id}"),
+                            &command,
+                        )?;
+                    }
+                    report.unity_commands_written += 1;
+                }
+            } else {
+                report.messages.push(format!(
+                    "Cinemachine sync requested for binding {} but Blender object {} is {} without camera FOV data",
+                    timeline.binding_id, source_camera.name, source_camera.object_type
+                ));
+            }
         }
     }
 
@@ -993,6 +1157,7 @@ fn parse_blender_objects(documents: &[CacheDocument]) -> BTreeMap<String, Blende
                 name.clone(),
                 BlenderObject {
                     name,
+                    object_type: field_string(value, 1, "type").unwrap_or_default(),
                     location: field_vec3(value, 4, "location").unwrap_or_default(),
                     rotation_euler: field_vec3(value, 5, "rotationEuler").unwrap_or_default(),
                     scale: field_vec3(value, 6, "scale").unwrap_or_else(|| vec![1.0, 1.0, 1.0]),
@@ -1006,6 +1171,9 @@ fn parse_blender_objects(documents: &[CacheDocument]) -> BTreeMap<String, Blende
                                 .collect()
                         })
                         .unwrap_or_default(),
+                    camera_field_of_view_degrees: value
+                        .get("camera")
+                        .and_then(|camera| field_f64(camera, 1, "fieldOfViewDegrees")),
                 },
             ))
         })
@@ -1029,6 +1197,7 @@ fn parse_blender_timeline(documents: &[CacheDocument]) -> Vec<BlenderTimeline> {
             Some(BlenderTimeline {
                 scene_name: field_string(value, 0, "name")?,
                 frame_current: field_i64(value, 1, "frameCurrent").unwrap_or(0),
+                camera_name: field_string(value, 4, "cameraName").unwrap_or_default(),
             })
         })
         .collect()
@@ -1082,6 +1251,7 @@ fn unity_transform_command(
 fn unity_property_command(
     command_id: &str,
     target_object_id: &str,
+    component_type: &str,
     property_path: &str,
     value: &str,
 ) -> Value {
@@ -1091,7 +1261,7 @@ fn unity_property_command(
         "setComponentProperty",
         target_object_id,
         "",
-        "",
+        component_type,
         property_path,
         value,
         "",
@@ -1302,6 +1472,57 @@ mod tests {
     }
 
     #[test]
+    fn sync_loop_args_parse_bounded_polling_options() -> Result<()> {
+        let args = SyncLoopArgs::parse(vec![
+            "--unity-cache".to_string(),
+            "unity.ccmp".to_string(),
+            "--blender-cache".to_string(),
+            "blender.ccmp".to_string(),
+            "--interval-ms".to_string(),
+            "25".to_string(),
+            "--max-passes".to_string(),
+            "3".to_string(),
+            "--dry-run".to_string(),
+        ])?;
+
+        assert_eq!(args.sync.unity_cache, PathBuf::from("unity.ccmp"));
+        assert_eq!(args.sync.blender_cache, PathBuf::from("blender.ccmp"));
+        assert!(args.sync.dry_run);
+        assert_eq!(args.interval_ms, 25);
+        assert_eq!(args.max_passes, Some(3));
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_loop_with_max_passes_runs_bounded_sync_pass() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_sync_stores(&unity_path, &blender_path, "unity-to-blender")?;
+
+        sync_loop(SyncLoopArgs {
+            sync: SyncArgs {
+                unity_cache: unity_path,
+                blender_cache: blender_path.clone(),
+                dry_run: false,
+            },
+            interval_ms: 1,
+            max_passes: Some(1),
+        })?;
+
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        assert!(
+            blender_store
+                .documents()?
+                .iter()
+                .any(|document| document.key.starts_with("blender/commands/"))
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn sync_once_writes_unity_transform_to_blender_command() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let unity_path = temp.path().join("unity.ccmp");
@@ -1378,6 +1599,67 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn sync_once_writes_cinemachine_camera_commands_from_blender_scene_camera() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_cinemachine_stores(&unity_path, &blender_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 2, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let commands: Vec<_> = unity_store
+            .documents()?
+            .into_iter()
+            .filter(|document| document.key.starts_with("unity/commands/"))
+            .map(|document| document.value)
+            .collect();
+
+        let transform = commands
+            .iter()
+            .find(|command| {
+                command.as_array().and_then(|items| items.get(2))
+                    == Some(&json!("setGameObjectTransform"))
+            })
+            .expect("Cinemachine camera sync should emit a transform command");
+        assert_eq!(
+            transform.as_array().and_then(|items| items.get(3)),
+            Some(&json!("unity-vcam"))
+        );
+        assert_eq!(
+            transform.as_array().and_then(|items| items.get(10)),
+            Some(&json!("3,4,5"))
+        );
+
+        let field_of_view = commands
+            .iter()
+            .find(|command| {
+                command.as_array().and_then(|items| items.get(6))
+                    == Some(&json!("m_Lens.FieldOfView"))
+            })
+            .expect("Cinemachine camera sync should emit a lens FOV command");
+        assert_eq!(
+            field_of_view.as_array().and_then(|items| items.get(2)),
+            Some(&json!("setComponentProperty"))
+        );
+        assert_eq!(
+            field_of_view.as_array().and_then(|items| items.get(5)),
+            Some(&json!("Cinemachine.CinemachineVirtualCamera"))
+        );
+        assert_eq!(
+            field_of_view.as_array().and_then(|items| items.get(7)),
+            Some(&json!("54.000000"))
+        );
+
+        Ok(())
+    }
+
     fn seed_sync_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
@@ -1444,6 +1726,60 @@ mod tests {
                 "scenes": [{
                     "name": "Scene",
                     "frameCurrent": 48
+                }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    fn seed_cinemachine_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.sync.timeline_binding.v0",
+            "sync/bindings/timelines/timeline-camera",
+            &json!({
+                "schema": "brokkr.sync.timeline_binding.v0",
+                "bindingId": "timeline-camera",
+                "sessionId": "session-main",
+                "displayName": "Camera",
+                "unityTimelineObjectId": "unity-director",
+                "unityCinemachineObjectId": "unity-vcam",
+                "blenderSceneName": "Scene",
+                "blenderActionName": "CameraAction",
+                "clockAuthority": "blender",
+                "frameRate": 24.0,
+                "syncFrame": false,
+                "syncCamera": true,
+                "enabled": true
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [{
+                    "name": "Camera",
+                    "type": "CAMERA",
+                    "location": [3.0, 4.0, 5.0],
+                    "rotationEuler": [0.0, 0.5, 1.0],
+                    "scale": [1.0, 1.0, 1.0],
+                    "visible": true,
+                    "materials": [],
+                    "camera": {
+                        "lensMillimeters": 35.0,
+                        "fieldOfViewDegrees": 54.0,
+                        "clipStart": 0.1,
+                        "clipEnd": 1000.0,
+                        "type": "PERSP"
+                    }
+                }],
+                "scenes": [{
+                    "name": "Scene",
+                    "frameCurrent": 48,
+                    "cameraName": "Camera"
                 }]
             }),
         )?;
