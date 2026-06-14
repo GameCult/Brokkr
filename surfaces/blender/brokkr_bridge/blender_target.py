@@ -12,8 +12,8 @@ from typing import Any, Iterable
 PROVIDER_ID = "brokkr.blender_editor"
 TOOL_KIND = "blender-editor"
 DEFAULT_BROKER_URI = "cultmesh://brokkr"
-DEFAULT_CULTCACHE_PATH = "//.brokkr/blender-editor.cultcache.jsonl"
-DEFAULT_CULTCACHE_PY_SRC = "E:/Projects/cultcache-py/src"
+DEFAULT_CULTMESH_CACHE_PATH = "//.brokkr/blender-editor.ccmp"
+DEFAULT_CULTLIB_PY_SRC = "E:/Projects/CultLib-main-work/packages/cultcache-py/src"
 DEFAULT_DEBUG_MIRROR_ROOT = "//.brokkr/blender-editor-debug"
 
 HOST_SNAPSHOT_SCHEMA = "brokkr.blender.host_snapshot.v0"
@@ -46,9 +46,12 @@ class BrokkrBlenderTarget:
         self.bpy = bpy_module
         self.last_snapshot: dict[str, Any] | None = None
         self.last_receipt: dict[str, Any] | None = None
+        self._node_key: tuple[str, str, str] | None = None
+        self._node: Any | None = None
+        self._documents: dict[str, Any] | None = None
 
     def resolve_cache_path(self, cache_path: str) -> str:
-        return self.bpy.path.abspath(cache_path or DEFAULT_CULTCACHE_PATH)
+        return self.bpy.path.abspath(cache_path or DEFAULT_CULTMESH_CACHE_PATH)
 
     def resolve_debug_mirror_root(self, debug_mirror_root: str) -> str:
         return self.bpy.path.abspath(debug_mirror_root or DEFAULT_DEBUG_MIRROR_ROOT)
@@ -57,12 +60,12 @@ class BrokkrBlenderTarget:
         self,
         context: Any,
         cache_path: str,
-        cultcache_py_src: str,
+        cultlib_py_src: str,
         debug_mirror_root: str = "",
     ) -> dict[str, Any]:
         snapshot = self.capture_snapshot(context)
-        cache, documents = self._open_cache(cache_path, cultcache_py_src)
-        cache.put(documents["host_snapshot"], "blender/host/current", snapshot)
+        node, documents = self._open_node(cache_path, cultlib_py_src)
+        node.database.put(documents["host_snapshot"], "blender/host/current", snapshot)
         if debug_mirror_root:
             self._write_debug_document(debug_mirror_root, "blender/host/current.json", snapshot)
         self.last_snapshot = snapshot
@@ -72,21 +75,21 @@ class BrokkrBlenderTarget:
         self,
         context: Any,
         cache_path: str,
-        cultcache_py_src: str,
+        cultlib_py_src: str,
         debug_mirror_root: str = "",
     ) -> list[dict[str, Any]]:
-        cache, documents = self._open_cache(cache_path, cultcache_py_src)
+        node, documents = self._open_node(cache_path, cultlib_py_src)
         if debug_mirror_root:
-            self._import_debug_command_files(cache, documents["command_intent"], debug_mirror_root)
+            self._import_debug_command_files(node, documents["command_intent"], debug_mirror_root)
 
-        snapshot = cache.snapshot()
+        snapshot = node.database.snapshot()
         commands = snapshot.get(COMMAND_INTENT_SCHEMA, {})
         receipts: list[dict[str, Any]] = []
 
         for command_key, command in sorted(commands.items()):
             receipt = self.execute_command(context, command)
-            self.publish_receipt(cache_path, cultcache_py_src, receipt, debug_mirror_root)
-            cache.delete(documents["command_intent"], command_key)
+            self.publish_receipt(cache_path, cultlib_py_src, receipt, debug_mirror_root)
+            node.database.delete(documents["command_intent"], command_key)
             receipts.append(receipt)
 
         return receipts
@@ -94,13 +97,13 @@ class BrokkrBlenderTarget:
     def publish_receipt(
         self,
         cache_path: str,
-        cultcache_py_src: str,
+        cultlib_py_src: str,
         receipt: dict[str, Any],
         debug_mirror_root: str = "",
     ) -> None:
         command_id = receipt.get("commandId") or uuid.uuid4().hex
-        cache, documents = self._open_cache(cache_path, cultcache_py_src)
-        cache.put(documents["command_receipt"], f"blender/receipts/{command_id}", receipt)
+        node, documents = self._open_node(cache_path, cultlib_py_src)
+        node.database.put(documents["command_receipt"], f"blender/receipts/{command_id}", receipt)
         if debug_mirror_root:
             self._write_debug_document(debug_mirror_root, f"blender/receipts/{command_id}.json", receipt)
         self.last_receipt = receipt
@@ -300,24 +303,32 @@ class BrokkrBlenderTarget:
             "observedAt": _now(),
         }
 
-    def _open_cache(self, cache_path: str, cultcache_py_src: str) -> tuple[Any, dict[str, Any]]:
-        cultcache = _load_cultcache(cultcache_py_src)
+    def _open_node(self, cache_path: str, cultlib_py_src: str) -> tuple[Any, dict[str, Any]]:
+        path = self.resolve_cache_path(cache_path)
+        source = str(Path(cultlib_py_src or DEFAULT_CULTLIB_PY_SRC))
+        runtime_id = PROVIDER_ID
+        node_key = (path, source, runtime_id)
+        if self._node is not None and self._documents is not None and self._node_key == node_key:
+            self._node.database.pull()
+            return self._node, self._documents
+
+        cultmesh, cultcache = _load_cultmesh(cultlib_py_src)
         documents = {
             "host_snapshot": cultcache.define_document_type(HOST_SNAPSHOT_SCHEMA),
             "command_intent": cultcache.define_document_type(COMMAND_INTENT_SCHEMA),
             "command_receipt": cultcache.define_document_type(COMMAND_RECEIPT_SCHEMA),
         }
-        path = self.resolve_cache_path(cache_path)
-        cache = (
-            cultcache.CultCache.builder()
-            .register_registry(tuple(documents.values()))
-            .add_generic_store(cultcache.JsonLinesBackingStore(path))
-            .build()
-        )
-        cache.pull_all_backing_stores()
-        return cache, documents
+        node = cultmesh.CultMesh.start_node(path, runtime_id=runtime_id)
+        for document in documents.values():
+            node.database.register_document(document)
+        node.database.pull()
 
-    def _import_debug_command_files(self, cache: Any, command_document: Any, debug_mirror_root: str) -> None:
+        self._node_key = node_key
+        self._node = node
+        self._documents = documents
+        return node, documents
+
+    def _import_debug_command_files(self, node: Any, command_document: Any, debug_mirror_root: str) -> None:
         commands_root = Path(self.resolve_debug_mirror_root(debug_mirror_root)) / "blender" / "commands"
         for command_path in sorted(commands_root.glob("*.json")):
             with command_path.open("r", encoding="utf-8") as handle:
@@ -325,7 +336,7 @@ class BrokkrBlenderTarget:
             command_id = command.get("commandId") or command_path.stem
             command["schema"] = command.get("schema") or COMMAND_INTENT_SCHEMA
             command["commandId"] = command_id
-            cache.put(command_document, f"blender/commands/{command_id}", command)
+            node.database.put(command_document, f"blender/commands/{command_id}", command)
             command_path.unlink(missing_ok=True)
 
     def _write_debug_document(self, debug_mirror_root: str, relative_path: str, document: dict[str, Any]) -> None:
@@ -335,20 +346,21 @@ class BrokkrBlenderTarget:
             json.dump(document, handle, indent=2, sort_keys=True)
 
 
-def _load_cultcache(cultcache_py_src: str) -> Any:
-    source = Path(cultcache_py_src or DEFAULT_CULTCACHE_PY_SRC)
+def _load_cultmesh(cultlib_py_src: str) -> tuple[Any, Any]:
+    source = Path(cultlib_py_src or DEFAULT_CULTLIB_PY_SRC)
     if source.exists():
         source_text = str(source)
         if source_text not in sys.path:
             sys.path.insert(0, source_text)
     try:
+        import cultmesh_py  # type: ignore
         import cultcache_py  # type: ignore
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "Brokkr Blender target requires cultcache-py. Set CultCache Python Source "
-            "to the cultcache-py/src directory or install cultcache-py into Blender's Python."
+            "Brokkr Blender target requires CultLib's Python CultMesh package. Set CultLib Python Source "
+            "to the CultLib packages/cultcache-py/src directory or install cultcache-py into Blender's Python."
         ) from exc
-    return cultcache_py
+    return cultmesh_py, cultcache_py
 
 
 def _now() -> str:

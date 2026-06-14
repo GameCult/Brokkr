@@ -12,8 +12,8 @@ import bpy
 
 from .blender_target import (
     DEFAULT_BROKER_URI,
-    DEFAULT_CULTCACHE_PATH,
-    DEFAULT_CULTCACHE_PY_SRC,
+    DEFAULT_CULTLIB_PY_SRC,
+    DEFAULT_CULTMESH_CACHE_PATH,
     DEFAULT_DEBUG_MIRROR_ROOT,
     PROVIDER_ID,
     TOOL_KIND,
@@ -39,18 +39,18 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="CultMesh broker URI for Brokkr",
     )
 
-    cultcache_path: bpy.props.StringProperty(
-        name="CultCache Store",
+    cultmesh_cache_path: bpy.props.StringProperty(
+        name="CultMesh Cache",
         subtype="FILE_PATH",
-        default=DEFAULT_CULTCACHE_PATH,
-        description="CultCache store used for Blender mirror documents",
+        default=DEFAULT_CULTMESH_CACHE_PATH,
+        description="CultMesh node cache used for Blender mirror documents",
     )
 
-    cultcache_py_src: bpy.props.StringProperty(
-        name="CultCache Python Source",
+    cultlib_py_src: bpy.props.StringProperty(
+        name="CultLib Python Source",
         subtype="DIR_PATH",
-        default=DEFAULT_CULTCACHE_PY_SRC,
-        description="Path to cultcache-py/src when cultcache-py is not installed in Blender",
+        default=DEFAULT_CULTLIB_PY_SRC,
+        description="Path to CultLib packages/cultcache-py/src when cultcache-py is not installed in Blender",
     )
 
     debug_mirror_root: bpy.props.StringProperty(
@@ -69,8 +69,8 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "broker_uri")
-        layout.prop(self, "cultcache_path")
-        layout.prop(self, "cultcache_py_src")
+        layout.prop(self, "cultmesh_cache_path")
+        layout.prop(self, "cultlib_py_src")
         layout.prop(self, "debug_mirror_root")
         layout.prop(self, "auto_capture")
 
@@ -90,7 +90,7 @@ class BROKKR_PT_status(bpy.types.Panel):
         layout.label(text=f"Provider: {PROVIDER_ID}")
         layout.label(text=f"Tool: {TOOL_KIND}")
         layout.label(text=f"Broker: {prefs.broker_uri}")
-        layout.label(text=f"Store: {adapter.resolve_cache_path(prefs.cultcache_path)}")
+        layout.label(text=f"Node: {adapter.resolve_cache_path(prefs.cultmesh_cache_path)}")
 
         row = layout.row(align=True)
         row.operator("brokkr.capture_snapshot", icon="FILE_REFRESH")
@@ -117,8 +117,8 @@ class BROKKR_OT_capture_snapshot(bpy.types.Operator):
         prefs = context.preferences.addons[__name__].preferences
         snapshot = target().publish_snapshot(
             context,
-            prefs.cultcache_path,
-            prefs.cultcache_py_src,
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
             prefs.debug_mirror_root,
         )
         self.report({"INFO"}, f"Brokkr mirrored Blender snapshot: {snapshot['observedAt']}")
@@ -134,8 +134,8 @@ class BROKKR_OT_drain_commands(bpy.types.Operator):
         prefs = context.preferences.addons[__name__].preferences
         receipts = target().drain_commands(
             context,
-            prefs.cultcache_path,
-            prefs.cultcache_py_src,
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
             prefs.debug_mirror_root,
         )
         self.report({"INFO"}, f"Brokkr processed {len(receipts)} Blender command(s)")
@@ -149,8 +149,8 @@ def _auto_capture(scene, depsgraph):
         return
     target().publish_snapshot(
         context,
-        prefs.preferences.cultcache_path,
-        prefs.preferences.cultcache_py_src,
+        prefs.preferences.cultmesh_cache_path,
+        prefs.preferences.cultlib_py_src,
         prefs.preferences.debug_mirror_root,
     )
 

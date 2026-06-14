@@ -30,7 +30,7 @@ broker.
 
 - `surfaces/unity/Packages/com.gamecult.brokkr`: Unity editor package scaffold.
 - `surfaces/blender/brokkr_bridge`: Blender add-on target backed by
-  `cultcache-py`, with optional debug export/import probes.
+  CultLib's Python CultMesh node, with optional debug export/import probes.
 - `brokkr-daemon`: Rust daemon skeleton that emits Brokkr's provider
   advertisement and command policy.
 

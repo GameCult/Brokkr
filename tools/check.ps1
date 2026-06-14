@@ -78,10 +78,10 @@ try {
     & $pythonExe -m py_compile surfaces\blender\brokkr_bridge\blender_target.py surfaces\blender\brokkr_bridge\__init__.py
     Assert-NativeSuccess "Blender adapter Python compile"
 
-    $cultCachePySrc = "E:\Projects\cultcache-py\src"
-    if (Test-Path $cultCachePySrc) {
-        & $pythonExe -c "import sys; sys.path.insert(0, r'$cultCachePySrc'); sys.path.insert(0, r'surfaces\blender\brokkr_bridge'); import blender_target; blender_target._load_cultcache(r'$cultCachePySrc')"
-        Assert-NativeSuccess "Blender adapter CultCache import"
+    $cultLibPySrc = "E:\Projects\CultLib-main-work\packages\cultcache-py\src"
+    if (Test-Path $cultLibPySrc) {
+        & $pythonExe -c "import sys, tempfile; sys.path.insert(0, r'$cultLibPySrc'); sys.path.insert(0, r'surfaces\blender\brokkr_bridge'); import blender_target; cultmesh, cultcache = blender_target._load_cultmesh(r'$cultLibPySrc'); doc = cultcache.define_document_type('brokkr.check.v0'); node = cultmesh.CultMesh.start_node(tempfile.NamedTemporaryFile(suffix='.ccmp').name, runtime_id='brokkr-check'); node.database.register_document(doc); node.database.put(doc, 'check', {'ok': True}); assert node.database.snapshot()['brokkr.check.v0']['check']['ok'] is True"
+        Assert-NativeSuccess "Blender adapter CultMesh import"
     }
 }
 finally {

@@ -18,10 +18,11 @@ surface projections. Verse-side clients write typed command-intent documents
 into the same mirror; Unity watches those intents, mutates the editor, and
 publishes receipts plus an updated snapshot.
 
-The Blender add-on uses `cultcache-py` as its local mirror store. Blender writes
-typed host snapshots and command receipts through registered CultCache document
-definitions, drains command intents from the same store, and only uses loose JSON
-files as optional debug/export probes.
+The Blender add-on uses CultLib's Python CultMesh runtime as its local mirror
+node. Blender writes typed host snapshots and command receipts through
+registered CultMesh database document definitions, drains command intents from
+the same node database, and only uses loose JSON files as optional debug/export
+probes.
 
 ## Invariants
 
