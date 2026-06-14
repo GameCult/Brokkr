@@ -51,6 +51,9 @@ namespace GameCult.Brokkr
         [Key(7)] public int childCount;
         [Key(8)] public string parentId = "";
         [Key(9)] public BrokkrComponentSnapshot[] components = Array.Empty<BrokkrComponentSnapshot>();
+        [Key(10)] public string localPosition = "";
+        [Key(11)] public string localEulerAngles = "";
+        [Key(12)] public string localScale = "";
     }
 
     [MessagePackObject]
@@ -100,6 +103,9 @@ namespace GameCult.Brokkr
         [Key(7)] public string value = "";
         [Key(8)] public string assetPath = "";
         [Key(9)] public string parentObjectId = "";
+        [Key(10)] public string localPosition = "";
+        [Key(11)] public string localEulerAngles = "";
+        [Key(12)] public string localScale = "";
     }
 
     [MessagePackObject]

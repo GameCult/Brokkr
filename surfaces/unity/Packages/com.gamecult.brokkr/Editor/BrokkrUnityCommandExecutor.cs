@@ -17,6 +17,7 @@ namespace GameCult.Brokkr.Editor
                 {
                     "createGameObject" => CreateGameObject(command),
                     "attachComponent" => AttachComponent(command),
+                    "setGameObjectTransform" => SetGameObjectTransform(command),
                     "setComponentProperty" => SetComponentProperty(command),
                     "instantiatePrefab" => InstantiatePrefab(command),
                     "createPrefabVariant" => CreatePrefabVariant(command),
@@ -87,6 +88,49 @@ namespace GameCult.Brokkr.Editor
             }
 
             return Accepted(command, "Serialized property updated.", command.targetObjectId);
+        }
+
+        private static BrokkrUnityCommandReceipt SetGameObjectTransform(BrokkrUnityCommand command)
+        {
+            var gameObject = ResolveGameObject(command.targetObjectId);
+            if (gameObject == null)
+            {
+                return Failed(command, "Target GameObject was not found.");
+            }
+
+            Undo.RecordObject(gameObject.transform, "Brokkr Set GameObject Transform");
+            if (!string.IsNullOrWhiteSpace(command.localPosition))
+            {
+                if (!TryParseVector3(command.localPosition, out var localPosition))
+                {
+                    return Failed(command, $"Expected localPosition as x,y,z: {command.localPosition}");
+                }
+
+                gameObject.transform.localPosition = localPosition;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.localEulerAngles))
+            {
+                if (!TryParseVector3(command.localEulerAngles, out var localEulerAngles))
+                {
+                    return Failed(command, $"Expected localEulerAngles as x,y,z: {command.localEulerAngles}");
+                }
+
+                gameObject.transform.localEulerAngles = localEulerAngles;
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.localScale))
+            {
+                if (!TryParseVector3(command.localScale, out var localScale))
+                {
+                    return Failed(command, $"Expected localScale as x,y,z: {command.localScale}");
+                }
+
+                gameObject.transform.localScale = localScale;
+            }
+
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+            return Accepted(command, "GameObject transform updated.", command.targetObjectId);
         }
 
         private static BrokkrUnityCommandReceipt InstantiatePrefab(BrokkrUnityCommand command)
@@ -207,6 +251,26 @@ namespace GameCult.Brokkr.Editor
                     message = $"Property type is not writable yet: {property.propertyType}.";
                     return false;
             }
+        }
+
+        private static bool TryParseVector3(string value, out Vector3 vector)
+        {
+            vector = default;
+            var parts = value.Split(',');
+            if (parts.Length != 3)
+            {
+                return false;
+            }
+
+            if (!float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
+                !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ||
+                !float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var z))
+            {
+                return false;
+            }
+
+            vector = new Vector3(x, y, z);
+            return true;
         }
 
         private static BrokkrUnityCommandReceipt Accepted(BrokkrUnityCommand command, string message, string objectId)

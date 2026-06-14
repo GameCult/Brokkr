@@ -87,7 +87,10 @@ namespace GameCult.Brokkr.Editor
                 layer = gameObject.layer,
                 childCount = gameObject.transform.childCount,
                 parentId = parentId,
-                components = CaptureComponents(gameObject)
+                components = CaptureComponents(gameObject),
+                localPosition = WriteVector3(gameObject.transform.localPosition),
+                localEulerAngles = WriteVector3(gameObject.transform.localEulerAngles),
+                localScale = WriteVector3(gameObject.transform.localScale)
             });
 
             for (var childIndex = 0; childIndex < gameObject.transform.childCount; childIndex++)
@@ -233,6 +236,15 @@ namespace GameCult.Brokkr.Editor
                 SerializedPropertyType.Quaternion => property.quaternionValue.eulerAngles.ToString(),
                 _ => ""
             };
+        }
+
+        private static string WriteVector3(Vector3 value)
+        {
+            return string.Join(
+                ",",
+                value.x.ToString(CultureInfo.InvariantCulture),
+                value.y.ToString(CultureInfo.InvariantCulture),
+                value.z.ToString(CultureInfo.InvariantCulture));
         }
     }
 }

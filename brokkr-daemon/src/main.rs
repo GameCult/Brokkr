@@ -1,5 +1,9 @@
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
+use cultcache_rs::{CacheBackingStore, CultCacheEnvelope, SingleFileMessagePackBackingStore};
 use serde::Serialize;
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 const PROVIDER_SCHEMA: &str = "gamecult.brokkr.provider_advertisement.v0";
 const PROVIDER_ID: &str = "brokkr.creative_tool_broker";
@@ -124,8 +128,11 @@ fn main() -> Result<()> {
     match command.as_str() {
         "provider" | "smoke" => print_provider(),
         "sync-contract" => print_sync_contract(),
+        "sync-once" => sync_once(SyncArgs::parse(args.collect())?),
         _ => {
-            eprintln!("usage: brokkr-daemon [provider|smoke|sync-contract]");
+            eprintln!(
+                "usage: brokkr-daemon [provider|smoke|sync-contract|sync-once --unity-cache PATH --blender-cache PATH [--dry-run]]"
+            );
             std::process::exit(2);
         }
     }
@@ -141,6 +148,12 @@ fn print_provider() -> Result<()> {
 
 fn print_sync_contract() -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&build_sync_organ())?);
+    Ok(())
+}
+
+fn sync_once(args: SyncArgs) -> Result<()> {
+    let report = run_sync_once(&args)?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 
@@ -442,6 +455,732 @@ fn build_unity_quest_routes() -> Vec<RealtimeRoute> {
     ]
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncArgs {
+    unity_cache: PathBuf,
+    blender_cache: PathBuf,
+    dry_run: bool,
+}
+
+impl SyncArgs {
+    fn parse(args: Vec<String>) -> Result<Self> {
+        let mut unity_cache = None;
+        let mut blender_cache = None;
+        let mut dry_run = false;
+        let mut index = 0;
+
+        while index < args.len() {
+            match args[index].as_str() {
+                "--unity-cache" => {
+                    index += 1;
+                    unity_cache = args.get(index).map(PathBuf::from);
+                }
+                "--blender-cache" => {
+                    index += 1;
+                    blender_cache = args.get(index).map(PathBuf::from);
+                }
+                "--dry-run" => dry_run = true,
+                other => return Err(anyhow!("unknown sync-once argument: {other}")),
+            }
+            index += 1;
+        }
+
+        Ok(Self {
+            unity_cache: unity_cache.ok_or_else(|| anyhow!("sync-once requires --unity-cache"))?,
+            blender_cache: blender_cache
+                .ok_or_else(|| anyhow!("sync-once requires --blender-cache"))?,
+            dry_run,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct SyncPassReport {
+    schema: &'static str,
+    status: &'static str,
+    dry_run: bool,
+    object_bindings_seen: usize,
+    sync_vars_seen: usize,
+    unity_commands_written: usize,
+    blender_commands_written: usize,
+    receipts_written: usize,
+    messages: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CacheDocument {
+    key: String,
+    value: Value,
+}
+
+#[derive(Debug, Clone)]
+struct ObjectBinding {
+    binding_id: String,
+    session_id: String,
+    display_name: String,
+    unity_object_id: String,
+    unity_path: String,
+    blender_object_name: String,
+    enabled: bool,
+    authority: String,
+}
+
+#[derive(Debug, Clone)]
+struct SyncVarBinding {
+    sync_var_id: String,
+    session_id: String,
+    binding_id: String,
+    kind: String,
+    unity_property_path: String,
+    blender_property_path: String,
+    authority: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TimelineBinding {
+    binding_id: String,
+    session_id: String,
+    unity_timeline_object_id: String,
+    unity_cinemachine_object_id: String,
+    blender_scene_name: String,
+    blender_action_name: String,
+    clock_authority: String,
+    frame_rate: f64,
+    sync_frame: bool,
+    sync_camera: bool,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct UnityObject {
+    object_id: String,
+    name: String,
+    path: String,
+    active_self: bool,
+    local_position: Vec<f64>,
+    local_euler_angles: Vec<f64>,
+    local_scale: Vec<f64>,
+}
+
+#[derive(Debug, Clone)]
+struct BlenderObject {
+    name: String,
+    location: Vec<f64>,
+    rotation_euler: Vec<f64>,
+    scale: Vec<f64>,
+    visible: bool,
+    materials: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BlenderTimeline {
+    scene_name: String,
+    frame_current: i64,
+}
+
+fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
+    let mut unity_store = MirrorStore::open(&args.unity_cache)?;
+    let mut blender_store = MirrorStore::open(&args.blender_cache)?;
+    let mut documents = Vec::new();
+    documents.extend(unity_store.documents()?);
+    documents.extend(blender_store.documents()?);
+
+    let object_bindings: Vec<_> = documents
+        .iter()
+        .filter(|document| document.key.starts_with("sync/bindings/objects/"))
+        .filter_map(|document| parse_object_binding(&document.value))
+        .collect();
+    let sync_vars: Vec<_> = documents
+        .iter()
+        .filter(|document| document.key.starts_with("sync/vars/"))
+        .filter_map(|document| parse_sync_var(&document.value))
+        .collect();
+    let timeline_bindings: Vec<_> = documents
+        .iter()
+        .filter(|document| document.key.starts_with("sync/bindings/timelines/"))
+        .filter_map(|document| parse_timeline_binding(&document.value))
+        .collect();
+    let unity_objects = parse_unity_objects(&documents);
+    let blender_objects = parse_blender_objects(&documents);
+    let blender_timeline = parse_blender_timeline(&documents);
+
+    let mut report = SyncPassReport {
+        schema: "brokkr.sync.pass_report.v0",
+        status: "ok",
+        dry_run: args.dry_run,
+        object_bindings_seen: object_bindings.len(),
+        sync_vars_seen: sync_vars.len(),
+        unity_commands_written: 0,
+        blender_commands_written: 0,
+        receipts_written: 0,
+        messages: Vec::new(),
+    };
+
+    let mut emitted_command_ids = BTreeSet::new();
+
+    for binding in object_bindings.iter().filter(|binding| binding.enabled) {
+        let binding_vars: Vec<_> = sync_vars
+            .iter()
+            .filter(|sync_var| {
+                sync_var.binding_id == binding.binding_id
+                    && sync_var.session_id == binding.session_id
+                    && sync_var.enabled
+            })
+            .collect();
+
+        for sync_var in binding_vars {
+            let authority = if sync_var.authority.trim().is_empty() {
+                binding.authority.as_str()
+            } else {
+                sync_var.authority.as_str()
+            };
+            match (authority, sync_var.kind.as_str()) {
+                ("unity-to-blender", "transform") => {
+                    let Some(source) = find_unity_object(&unity_objects, binding) else {
+                        report.messages.push(format!(
+                            "missing Unity object for binding {}",
+                            binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "unity-to-blender-transform",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = json!({
+                            "schema": "brokkr.blender.command_intent.v0",
+                            "commandId": command_id,
+                            "action": "setObjectTransform",
+                            "targetObjectName": binding.blender_object_name,
+                            "location": source.local_position,
+                            "rotationEuler": source.local_euler_angles,
+                            "scale": source.local_scale,
+                        });
+                        if !args.dry_run {
+                            blender_store.put_json_document(
+                                "brokkr.blender.command_intent.v0",
+                                &format!(
+                                    "blender/commands/{}",
+                                    command["commandId"].as_str().unwrap_or("sync")
+                                ),
+                                &command,
+                            )?;
+                        }
+                        report.blender_commands_written += 1;
+                    }
+                }
+                ("unity-to-blender", "active-state") => {
+                    let Some(source) = find_unity_object(&unity_objects, binding) else {
+                        continue;
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "unity-to-blender-active",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = json!({
+                            "schema": "brokkr.blender.command_intent.v0",
+                            "commandId": command_id,
+                            "action": "setObjectVisibility",
+                            "targetObjectName": binding.blender_object_name,
+                            "visible": source.active_self,
+                        });
+                        if !args.dry_run {
+                            blender_store.put_json_document(
+                                "brokkr.blender.command_intent.v0",
+                                &format!(
+                                    "blender/commands/{}",
+                                    command["commandId"].as_str().unwrap_or("sync")
+                                ),
+                                &command,
+                            )?;
+                        }
+                        report.blender_commands_written += 1;
+                    }
+                }
+                ("blender-to-unity", "transform") => {
+                    let Some(source) = blender_objects.get(&binding.blender_object_name) else {
+                        report.messages.push(format!(
+                            "missing Blender object {} for binding {}",
+                            binding.blender_object_name, binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "blender-to-unity-transform",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = unity_transform_command(
+                            &command_id,
+                            &binding.unity_object_id,
+                            &source.location,
+                            &source.rotation_euler,
+                            &source.scale,
+                        );
+                        if !args.dry_run {
+                            unity_store.put_messagepack_document(
+                                "brokkr.unity.command_intent.v0",
+                                &format!("unity/commands/{command_id}"),
+                                &command,
+                            )?;
+                        }
+                        report.unity_commands_written += 1;
+                    }
+                }
+                ("blender-to-unity", "material") => {
+                    let Some(source) = blender_objects.get(&binding.blender_object_name) else {
+                        continue;
+                    };
+                    let material = source.materials.first().cloned().unwrap_or_default();
+                    report.messages.push(format!(
+                        "material sync requested for {} -> {} (source name={}, visible={}, material={}) but Unity material import mapping is not implemented yet",
+                        binding.blender_object_name,
+                        binding.unity_object_id,
+                        source.name,
+                        source.visible,
+                        material
+                    ));
+                }
+                _ => report.messages.push(format!(
+                    "unsupported sync var {} kind={} authority={} unityPath={} blenderPath={}",
+                    sync_var.sync_var_id,
+                    sync_var.kind,
+                    authority,
+                    sync_var.unity_property_path,
+                    sync_var.blender_property_path
+                )),
+            }
+        }
+    }
+
+    for timeline in timeline_bindings.iter().filter(|binding| binding.enabled) {
+        if timeline.sync_frame {
+            let Some(source) = blender_timeline
+                .iter()
+                .find(|candidate| candidate.scene_name == timeline.blender_scene_name)
+                .or_else(|| blender_timeline.first())
+            else {
+                report.messages.push(
+                    "timeline sync requested but no Blender scene snapshot is available"
+                        .to_string(),
+                );
+                continue;
+            };
+            let command_id = stable_id([
+                "sync",
+                &timeline.binding_id,
+                "timeline-frame",
+                &source.frame_current.to_string(),
+            ]);
+            let seconds = source.frame_current as f64 / timeline.frame_rate.max(0.001);
+            let command = unity_property_command(
+                &command_id,
+                &timeline.unity_timeline_object_id,
+                "m_Time",
+                &format!("{seconds:.6}"),
+            );
+            if !args.dry_run {
+                unity_store.put_messagepack_document(
+                    "brokkr.unity.command_intent.v0",
+                    &format!("unity/commands/{command_id}"),
+                    &command,
+                )?;
+            }
+            report.unity_commands_written += 1;
+        }
+
+        if timeline.sync_camera {
+            report.messages.push(format!(
+                "Cinemachine syncvar is visible for binding {} session={} unityCamera={} blenderAction={} clockAuthority={} but camera lens/body mapping still needs a Cinemachine-specific command writer",
+                timeline.binding_id,
+                timeline.session_id,
+                timeline.unity_cinemachine_object_id,
+                timeline.blender_action_name,
+                timeline.clock_authority
+            ));
+        }
+    }
+
+    let receipt = json!({
+        "schema": "brokkr.sync.receipt.v0",
+        "receiptId": stable_id(["sync-receipt", &chrono_like_timestamp_id()]),
+        "sessionId": object_bindings
+            .first()
+            .map(|binding| binding.session_id.as_str())
+            .or_else(|| timeline_bindings.first().map(|binding| binding.session_id.as_str()))
+            .unwrap_or("default"),
+        "status": report.status,
+        "message": format!(
+            "wrote {} Unity command(s) and {} Blender command(s)",
+            report.unity_commands_written, report.blender_commands_written
+        ),
+        "observedAt": chrono_like_now(),
+    });
+    if !args.dry_run {
+        unity_store.put_json_document(
+            "brokkr.sync.receipt.v0",
+            &format!(
+                "sync/receipts/{}",
+                receipt["receiptId"].as_str().unwrap_or("sync-receipt")
+            ),
+            &receipt,
+        )?;
+    }
+    report.receipts_written += 1;
+
+    Ok(report)
+}
+
+struct MirrorStore {
+    store: SingleFileMessagePackBackingStore,
+}
+
+impl MirrorStore {
+    fn open(path: &Path) -> Result<Self> {
+        Ok(Self {
+            store: SingleFileMessagePackBackingStore::new(path),
+        })
+    }
+
+    fn documents(&mut self) -> Result<Vec<CacheDocument>> {
+        let mut documents = Vec::new();
+        for envelope in self.store.pull_all()? {
+            let value = decode_payload(&envelope).with_context(|| {
+                format!("failed to decode {} at {}", envelope.r#type, envelope.key)
+            })?;
+            documents.push(CacheDocument {
+                key: envelope.key,
+                value,
+            });
+        }
+        Ok(documents)
+    }
+
+    fn put_json_document(&mut self, schema: &str, key: &str, value: &Value) -> Result<()> {
+        let payload = serde_json::to_vec(value)?;
+        self.store.push(&CultCacheEnvelope {
+            key: key.to_string(),
+            r#type: schema.to_string(),
+            payload,
+            stored_at: chrono_like_now(),
+            schema_id: Some(schema.to_string()),
+        })
+    }
+
+    fn put_messagepack_document(&mut self, schema: &str, key: &str, value: &Value) -> Result<()> {
+        let payload = rmp_serde::to_vec(value)?;
+        self.store.push(&CultCacheEnvelope {
+            key: key.to_string(),
+            r#type: schema.to_string(),
+            payload,
+            stored_at: chrono_like_now(),
+            schema_id: Some(schema.to_string()),
+        })
+    }
+}
+
+fn decode_payload(envelope: &CultCacheEnvelope) -> Result<Value> {
+    serde_json::from_slice(&envelope.payload)
+        .or_else(|_| rmp_serde::from_slice(&envelope.payload))
+        .with_context(|| {
+            format!(
+                "payload is neither MessagePack nor JSON for {}",
+                envelope.key
+            )
+        })
+}
+
+fn parse_object_binding(value: &Value) -> Option<ObjectBinding> {
+    Some(ObjectBinding {
+        binding_id: field_string(value, 1, "bindingId")?,
+        session_id: field_string(value, 2, "sessionId").unwrap_or_else(|| "default".to_string()),
+        display_name: field_string(value, 3, "displayName").unwrap_or_default(),
+        unity_object_id: field_string(value, 4, "unityObjectId").unwrap_or_default(),
+        unity_path: field_string(value, 5, "unityPath").unwrap_or_default(),
+        blender_object_name: field_string(value, 6, "blenderObjectName").unwrap_or_default(),
+        enabled: field_bool(value, 8, "enabled").unwrap_or(true),
+        authority: field_string(value, 9, "authority")
+            .unwrap_or_else(|| "unity-to-blender".to_string()),
+    })
+}
+
+fn parse_sync_var(value: &Value) -> Option<SyncVarBinding> {
+    Some(SyncVarBinding {
+        sync_var_id: field_string(value, 1, "syncVarId")?,
+        session_id: field_string(value, 2, "sessionId").unwrap_or_else(|| "default".to_string()),
+        binding_id: field_string(value, 3, "bindingId")?,
+        kind: field_string(value, 5, "kind")?,
+        unity_property_path: field_string(value, 6, "unityPropertyPath").unwrap_or_default(),
+        blender_property_path: field_string(value, 7, "blenderPropertyPath").unwrap_or_default(),
+        authority: field_string(value, 8, "authority").unwrap_or_default(),
+        enabled: field_bool(value, 9, "enabled").unwrap_or(true),
+    })
+}
+
+fn parse_timeline_binding(value: &Value) -> Option<TimelineBinding> {
+    Some(TimelineBinding {
+        binding_id: field_string(value, 1, "bindingId")?,
+        session_id: field_string(value, 2, "sessionId").unwrap_or_else(|| "default".to_string()),
+        unity_timeline_object_id: field_string(value, 4, "unityTimelineObjectId")
+            .unwrap_or_default(),
+        unity_cinemachine_object_id: field_string(value, 5, "unityCinemachineObjectId")
+            .unwrap_or_default(),
+        blender_scene_name: field_string(value, 6, "blenderSceneName").unwrap_or_default(),
+        blender_action_name: field_string(value, 7, "blenderActionName").unwrap_or_default(),
+        clock_authority: field_string(value, 8, "clockAuthority")
+            .unwrap_or_else(|| "blender".to_string()),
+        frame_rate: field_f64(value, 9, "frameRate").unwrap_or(24.0),
+        sync_frame: field_bool(value, 10, "syncFrame").unwrap_or(false),
+        sync_camera: field_bool(value, 11, "syncCamera").unwrap_or(false),
+        enabled: field_bool(value, 12, "enabled").unwrap_or(true),
+    })
+}
+
+fn parse_unity_objects(documents: &[CacheDocument]) -> Vec<UnityObject> {
+    let Some(snapshot) = documents
+        .iter()
+        .find(|document| document.key == "unity/host/current")
+        .map(|document| &document.value)
+    else {
+        return Vec::new();
+    };
+    let Some(objects) = field_array(snapshot, 12, "sceneObjects") else {
+        return Vec::new();
+    };
+    objects
+        .iter()
+        .filter_map(|value| {
+            Some(UnityObject {
+                object_id: field_string(value, 0, "objectId")?,
+                name: field_string(value, 1, "name").unwrap_or_default(),
+                path: field_string(value, 2, "path").unwrap_or_default(),
+                active_self: field_bool(value, 4, "activeSelf").unwrap_or(true),
+                local_position: field_vec3(value, 10, "localPosition").unwrap_or_default(),
+                local_euler_angles: field_vec3(value, 11, "localEulerAngles").unwrap_or_default(),
+                local_scale: field_vec3(value, 12, "localScale")
+                    .unwrap_or_else(|| vec![1.0, 1.0, 1.0]),
+            })
+        })
+        .collect()
+}
+
+fn parse_blender_objects(documents: &[CacheDocument]) -> BTreeMap<String, BlenderObject> {
+    let Some(snapshot) = documents
+        .iter()
+        .find(|document| document.key == "blender/host/current")
+        .map(|document| &document.value)
+    else {
+        return BTreeMap::new();
+    };
+    let Some(objects) = field_array(snapshot, 17, "objects") else {
+        return BTreeMap::new();
+    };
+    objects
+        .iter()
+        .filter_map(|value| {
+            let name = field_string(value, 0, "name")?;
+            Some((
+                name.clone(),
+                BlenderObject {
+                    name,
+                    location: field_vec3(value, 4, "location").unwrap_or_default(),
+                    rotation_euler: field_vec3(value, 5, "rotationEuler").unwrap_or_default(),
+                    scale: field_vec3(value, 6, "scale").unwrap_or_else(|| vec![1.0, 1.0, 1.0]),
+                    visible: field_bool(value, 7, "visible").unwrap_or(true),
+                    materials: field_array(value, 10, "materials")
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn parse_blender_timeline(documents: &[CacheDocument]) -> Vec<BlenderTimeline> {
+    let Some(snapshot) = documents
+        .iter()
+        .find(|document| document.key == "blender/host/current")
+        .map(|document| &document.value)
+    else {
+        return Vec::new();
+    };
+    let Some(scenes) = field_array(snapshot, 16, "scenes") else {
+        return Vec::new();
+    };
+    scenes
+        .iter()
+        .filter_map(|value| {
+            Some(BlenderTimeline {
+                scene_name: field_string(value, 0, "name")?,
+                frame_current: field_i64(value, 1, "frameCurrent").unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+fn find_unity_object<'a>(
+    objects: &'a [UnityObject],
+    binding: &ObjectBinding,
+) -> Option<&'a UnityObject> {
+    objects
+        .iter()
+        .find(|object| {
+            !binding.unity_object_id.is_empty() && object.object_id == binding.unity_object_id
+        })
+        .or_else(|| {
+            objects
+                .iter()
+                .find(|object| !binding.unity_path.is_empty() && object.path == binding.unity_path)
+        })
+        .or_else(|| {
+            objects.iter().find(|object| {
+                !binding.display_name.is_empty() && object.name == binding.display_name
+            })
+        })
+}
+
+fn unity_transform_command(
+    command_id: &str,
+    target_object_id: &str,
+    location: &[f64],
+    rotation: &[f64],
+    scale: &[f64],
+) -> Value {
+    json!([
+        "brokkr.unity.command_intent.v0",
+        command_id,
+        "setGameObjectTransform",
+        target_object_id,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        vec3_csv(location),
+        vec3_csv(rotation),
+        vec3_csv(scale)
+    ])
+}
+
+fn unity_property_command(
+    command_id: &str,
+    target_object_id: &str,
+    property_path: &str,
+    value: &str,
+) -> Value {
+    json!([
+        "brokkr.unity.command_intent.v0",
+        command_id,
+        "setComponentProperty",
+        target_object_id,
+        "",
+        "",
+        property_path,
+        value,
+        "",
+        "",
+        "",
+        "",
+        ""
+    ])
+}
+
+fn field_string(value: &Value, slot: usize, name: &str) -> Option<String> {
+    value
+        .get(name)
+        .and_then(Value::as_str)
+        .or_else(|| value.as_array()?.get(slot)?.as_str())
+        .map(str::to_string)
+}
+
+fn field_bool(value: &Value, slot: usize, name: &str) -> Option<bool> {
+    value
+        .get(name)
+        .and_then(Value::as_bool)
+        .or_else(|| value.as_array()?.get(slot)?.as_bool())
+}
+
+fn field_f64(value: &Value, slot: usize, name: &str) -> Option<f64> {
+    value
+        .get(name)
+        .and_then(Value::as_f64)
+        .or_else(|| value.as_array()?.get(slot)?.as_f64())
+}
+
+fn field_i64(value: &Value, slot: usize, name: &str) -> Option<i64> {
+    value
+        .get(name)
+        .and_then(Value::as_i64)
+        .or_else(|| value.as_array()?.get(slot)?.as_i64())
+}
+
+fn field_array<'a>(value: &'a Value, slot: usize, name: &str) -> Option<&'a Vec<Value>> {
+    value
+        .get(name)
+        .and_then(Value::as_array)
+        .or_else(|| value.as_array()?.get(slot)?.as_array())
+}
+
+fn field_vec3(value: &Value, slot: usize, name: &str) -> Option<Vec<f64>> {
+    let raw = value.get(name).or_else(|| value.as_array()?.get(slot))?;
+    if let Some(items) = raw.as_array() {
+        return Some(items.iter().filter_map(Value::as_f64).take(3).collect());
+    }
+    raw.as_str().map(parse_vec3)
+}
+
+fn parse_vec3(value: &str) -> Vec<f64> {
+    value
+        .trim_matches(|candidate| candidate == '(' || candidate == ')')
+        .split(',')
+        .filter_map(|part| part.trim().parse::<f64>().ok())
+        .take(3)
+        .collect()
+}
+
+fn vec3_csv(values: &[f64]) -> String {
+    let x = values.first().copied().unwrap_or(0.0);
+    let y = values.get(1).copied().unwrap_or(0.0);
+    let z = values.get(2).copied().unwrap_or(0.0);
+    format!("{x},{y},{z}")
+}
+
+fn stable_id<const N: usize>(parts: [&str; N]) -> String {
+    parts
+        .iter()
+        .map(|part| part.replace([' ', '/', '\\'], "_"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+fn chrono_like_now() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}.{:09}Z", now.as_secs(), now.subsec_nanos())
+}
+
+fn chrono_like_timestamp_id() -> String {
+    chrono_like_now().replace(['.', ':', 'Z'], "_")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,5 +1299,174 @@ mod tests {
                 .sync_var_kinds
                 .contains(&"cinemachine-virtual-camera")
         );
+    }
+
+    #[test]
+    fn sync_once_writes_unity_transform_to_blender_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_sync_stores(&unity_path, &blender_path, "unity-to-blender")?;
+        assert_seed_contains_sync_docs(&unity_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path.clone(),
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.blender_commands_written, 1, "{report:#?}");
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        let command = blender_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("blender/commands/"))
+            .expect("Brokkr should emit a Blender command");
+
+        assert_eq!(command.value["action"], "setObjectTransform");
+        assert_eq!(command.value["targetObjectName"], "Cube");
+        assert_eq!(command.value["location"], json!([1.0, 2.0, 3.0]));
+        assert_eq!(command.value["rotationEuler"], json!([4.0, 5.0, 6.0]));
+        assert_eq!(command.value["scale"], json!([1.0, 1.0, 1.0]));
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_once_writes_blender_transform_to_unity_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_sync_stores(&unity_path, &blender_path, "blender-to-unity")?;
+        assert_seed_contains_sync_docs(&unity_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 1, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let command = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("unity/commands/"))
+            .expect("Brokkr should emit a Unity command");
+
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(2)),
+            Some(&json!("setGameObjectTransform"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(3)),
+            Some(&json!("unity-cube"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(10)),
+            Some(&json!("10,20,30"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(11)),
+            Some(&json!("0.1,0.2,0.3"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(12)),
+            Some(&json!("2,2,2"))
+        );
+
+        Ok(())
+    }
+
+    fn seed_sync_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({
+                "sceneObjects": [{
+                    "objectId": "unity-cube",
+                    "name": "Cube",
+                    "path": "/Cube",
+                    "activeSelf": true,
+                    "localPosition": [1.0, 2.0, 3.0],
+                    "localEulerAngles": [4.0, 5.0, 6.0],
+                    "localScale": [1.0, 1.0, 1.0]
+                }]
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityObjectId": "unity-cube",
+                "unityPath": "/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": authority
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.var.v0",
+            "sync/vars/var-cube-transform",
+            &json!({
+                "schema": "brokkr.sync.var.v0",
+                "syncVarId": "var-cube-transform",
+                "sessionId": "session-main",
+                "bindingId": "binding-cube",
+                "displayName": "Transform",
+                "kind": "transform",
+                "unityPropertyPath": "Transform",
+                "blenderPropertyPath": "location,rotationEuler,scale",
+                "authority": authority,
+                "enabled": true
+            }),
+        )?;
+
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [{
+                    "name": "Cube",
+                    "location": [10.0, 20.0, 30.0],
+                    "rotationEuler": [0.1, 0.2, 0.3],
+                    "scale": [2.0, 2.0, 2.0],
+                    "visible": true,
+                    "materials": ["Mat"]
+                }],
+                "scenes": [{
+                    "name": "Scene",
+                    "frameCurrent": 48
+                }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    fn assert_seed_contains_sync_docs(unity_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let keys: Vec<_> = unity_store
+            .documents()?
+            .into_iter()
+            .map(|document| document.key)
+            .collect();
+        assert!(
+            keys.iter()
+                .any(|key| key == "sync/bindings/objects/binding-cube"),
+            "{keys:#?}"
+        );
+        assert!(
+            keys.iter().any(|key| key == "sync/vars/var-cube-transform"),
+            "{keys:#?}"
+        );
+        Ok(())
     }
 }

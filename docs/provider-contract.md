@@ -72,6 +72,7 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 
 - `createGameObject`
 - `attachComponent`
+- `setGameObjectTransform`
 - `setComponentProperty`
 - `instantiatePrefab`
 - `createPrefabVariant`

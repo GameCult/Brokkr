@@ -327,6 +327,8 @@ class BrokkrBlenderTarget:
                 return self._delete_object(context, command)
             if action == "setObjectTransform":
                 return self._set_object_transform(context, command)
+            if action == "setObjectVisibility":
+                return self._set_object_visibility(context, command)
             if action == "selectObject":
                 return self._select_object(context, command)
             if action == "assignMaterial":
@@ -373,6 +375,16 @@ class BrokkrBlenderTarget:
             obj.scale = _vector(command["scale"], 3, obj.scale)
 
         return self._receipt(command, "accepted", "Blender object transform updated.", obj.name)
+
+    def _set_object_visibility(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        obj = self._resolve_object(command)
+        if obj is None:
+            return self._receipt(command, "failed", "Target Blender object was not found.", "")
+
+        visible = bool(command.get("visible", True))
+        obj.hide_viewport = not visible
+        obj.hide_render = not visible
+        return self._receipt(command, "accepted", "Blender object visibility updated.", obj.name)
 
     def _select_object(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         obj = self._resolve_object(command)
