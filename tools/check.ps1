@@ -80,7 +80,7 @@ try {
 
     $cultLibPySrc = "E:\Projects\CultLib-main-work\packages\cultcache-py\src"
     if (Test-Path $cultLibPySrc) {
-        & $pythonExe -c "import sys, tempfile; sys.path.insert(0, r'$cultLibPySrc'); sys.path.insert(0, r'surfaces\blender\brokkr_bridge'); import blender_target; cultmesh, cultcache = blender_target._load_cultmesh(r'$cultLibPySrc'); doc = cultcache.define_document_type('brokkr.check.v0'); node = cultmesh.CultMesh.start_node(tempfile.NamedTemporaryFile(suffix='.ccmp').name, runtime_id='brokkr-check'); node.database.register_document(doc); node.database.put(doc, 'check', {'ok': True}); assert node.database.snapshot()['brokkr.check.v0']['check']['ok'] is True"
+        & $pythonExe -c "import sys, tempfile; sys.path.insert(0, r'$cultLibPySrc'); sys.path.insert(0, r'surfaces\blender\brokkr_bridge'); import blender_target; cultmesh, cultcache = blender_target._load_cultmesh(r'$cultLibPySrc'); doc = cultcache.define_document_type('brokkr.check.v0'); node = cultmesh.CultMesh.start_node(tempfile.NamedTemporaryFile(suffix='.ccmp').name, runtime_id='brokkr-check'); node.database.register_document(doc); node.database.put(doc, 'check', {'ok': True}); assert node.database.snapshot()['brokkr.check.v0']['check']['ok'] is True; server = cultmesh.CultMesh.serve_node(node, host='127.0.0.1', port=0); assert server.port > 0; server.stop()"
         Assert-NativeSuccess "Blender adapter CultMesh import"
     }
 }

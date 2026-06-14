@@ -66,6 +66,34 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Capture and publish a Blender host snapshot on dependency graph updates",
     )
 
+    serve_host: bpy.props.StringProperty(
+        name="Serve Host",
+        default="127.0.0.1",
+        description="Host interface for the Blender CultMesh server",
+    )
+
+    serve_port: bpy.props.IntProperty(
+        name="Serve Port",
+        default=0,
+        min=0,
+        max=65535,
+        description="Port for the Blender CultMesh server; 0 asks the OS for a free port",
+    )
+
+    max_snapshot_documents: bpy.props.IntProperty(
+        name="Max Snapshot Documents",
+        default=1000,
+        min=1,
+        description="Maximum documents returned by a served snapshot response",
+    )
+
+    max_snapshot_bytes: bpy.props.IntProperty(
+        name="Max Snapshot Bytes",
+        default=4194304,
+        min=1024,
+        description="Maximum encoded snapshot response size",
+    )
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "broker_uri")
@@ -73,6 +101,10 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "cultlib_py_src")
         layout.prop(self, "debug_mirror_root")
         layout.prop(self, "auto_capture")
+        layout.prop(self, "serve_host")
+        layout.prop(self, "serve_port")
+        layout.prop(self, "max_snapshot_documents")
+        layout.prop(self, "max_snapshot_bytes")
 
 
 class BROKKR_PT_status(bpy.types.Panel):
@@ -91,10 +123,16 @@ class BROKKR_PT_status(bpy.types.Panel):
         layout.label(text=f"Tool: {TOOL_KIND}")
         layout.label(text=f"Broker: {prefs.broker_uri}")
         layout.label(text=f"Node: {adapter.resolve_cache_path(prefs.cultmesh_cache_path)}")
+        server = adapter.server_status()
+        layout.label(text=f"Server: {server['endpoint'] if server['running'] else 'stopped'}")
 
         row = layout.row(align=True)
         row.operator("brokkr.capture_snapshot", icon="FILE_REFRESH")
         row.operator("brokkr.drain_commands", icon="PLAY")
+
+        server_row = layout.row(align=True)
+        server_row.operator("brokkr.start_server", icon="NETWORK_DRIVE")
+        server_row.operator("brokkr.stop_server", icon="CANCEL")
 
         if adapter.last_snapshot:
             layout.separator()
@@ -142,6 +180,36 @@ class BROKKR_OT_drain_commands(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BROKKR_OT_start_server(bpy.types.Operator):
+    bl_idname = "brokkr.start_server"
+    bl_label = "Start Server"
+    bl_description = "Serve the Blender CultMesh node over the local CultNet/CultMesh endpoint"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        status = target().start_server(
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+            prefs.serve_host,
+            prefs.serve_port,
+            prefs.max_snapshot_documents,
+            prefs.max_snapshot_bytes,
+        )
+        self.report({"INFO"}, f"Brokkr Blender server: {status['endpoint']}")
+        return {"FINISHED"}
+
+
+class BROKKR_OT_stop_server(bpy.types.Operator):
+    bl_idname = "brokkr.stop_server"
+    bl_label = "Stop Server"
+    bl_description = "Stop the Blender CultMesh server"
+
+    def execute(self, context):
+        target().stop_server()
+        self.report({"INFO"}, "Brokkr Blender server stopped.")
+        return {"FINISHED"}
+
+
 def _auto_capture(scene, depsgraph):
     context = bpy.context
     prefs = context.preferences.addons.get(__name__)
@@ -160,6 +228,8 @@ classes = (
     BROKKR_PT_status,
     BROKKR_OT_capture_snapshot,
     BROKKR_OT_drain_commands,
+    BROKKR_OT_start_server,
+    BROKKR_OT_stop_server,
 )
 
 
@@ -174,6 +244,8 @@ def unregister():
     if _auto_capture in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_auto_capture)
     global _target
+    if _target is not None:
+        _target.stop_server()
     _target = None
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

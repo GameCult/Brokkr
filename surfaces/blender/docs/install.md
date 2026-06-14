@@ -21,6 +21,11 @@ The default node cache is:
 .brokkr/blender-editor.ccmp
 ```
 
+The panel can also serve that node through CultMesh Python. Leave `Serve Port`
+at `0` to bind a free local port, or set a fixed port when another runtime needs
+a stable endpoint. The panel reports the active `cultnet://host:port` endpoint
+after `Start Server`.
+
 `Debug Export Root` may still emit readable JSON probe files under
 `.brokkr/blender-editor-debug`, but those files are debug/import glue. CultCache
 owns the mirror state.
@@ -36,6 +41,9 @@ owns the mirror state.
 6. Click `Drain Commands`.
 7. Inspect `.brokkr/blender-editor.ccmp` or the optional debug export
    at `.brokkr/blender-editor-debug/blender/receipts/{commandId}.json`.
+8. Click `Start Server`.
+9. Use the reported `cultnet://host:port` endpoint from a CultMesh/CultNet
+   client to read snapshots or write command intents.
 
 Admitted command actions:
 

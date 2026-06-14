@@ -49,6 +49,8 @@ class BrokkrBlenderTarget:
         self._node_key: tuple[str, str, str] | None = None
         self._node: Any | None = None
         self._documents: dict[str, Any] | None = None
+        self._server_key: tuple[str, str, str, str, int, int, int] | None = None
+        self._server: Any | None = None
 
     def resolve_cache_path(self, cache_path: str) -> str:
         return self.bpy.path.abspath(cache_path or DEFAULT_CULTMESH_CACHE_PATH)
@@ -107,6 +109,91 @@ class BrokkrBlenderTarget:
         if debug_mirror_root:
             self._write_debug_document(debug_mirror_root, f"blender/receipts/{command_id}.json", receipt)
         self.last_receipt = receipt
+
+    def start_server(
+        self,
+        cache_path: str,
+        cultlib_py_src: str,
+        host: str,
+        port: int,
+        max_snapshot_documents: int,
+        max_snapshot_bytes: int,
+    ) -> dict[str, Any]:
+        node, documents = self._open_node(cache_path, cultlib_py_src)
+        resolved_host = host or "127.0.0.1"
+        server_key = (
+            self.resolve_cache_path(cache_path),
+            str(Path(cultlib_py_src or DEFAULT_CULTLIB_PY_SRC)),
+            node.runtime_id,
+            resolved_host,
+            int(port),
+            int(max_snapshot_documents),
+            int(max_snapshot_bytes),
+        )
+        if self._server is not None and self._server_key == server_key:
+            return self.server_status()
+
+        self.stop_server()
+        cultmesh, _cultcache = _load_cultmesh(cultlib_py_src)
+        verse_catalog = cultmesh.CultMesh.create_verse_catalog()
+        peer_catalog = cultmesh.CultMesh.create_peer_catalog()
+        server = cultmesh.CultMesh.serve_node(
+            node,
+            verse_catalog=verse_catalog,
+            peer_catalog=peer_catalog,
+            host=resolved_host,
+            port=int(port),
+            display_name="Brokkr Blender Editor",
+            max_snapshot_documents=int(max_snapshot_documents),
+            max_snapshot_bytes=int(max_snapshot_bytes),
+        )
+
+        endpoint = f"cultnet://{resolved_host}:{server.port}"
+        verse_catalog.upsert(cultmesh.CultMeshVerseDescriptor(
+            verse_id="brokkr.blender",
+            display_name="Brokkr Blender",
+            authority_model="host-owned-editor-mirror",
+            compatibility=cultmesh.CultMeshVerseCompatibility(
+                transport_version="cultmesh.v0",
+                rules_hash="brokkr.blender.v0",
+            ),
+            discovery_endpoints=(endpoint,),
+            authority_runtime_ids=(node.runtime_id,),
+            description="Blender editor mirror served by Brokkr through CultMesh Python.",
+        ))
+        peer_catalog.upsert(cultmesh.CultMeshPeerCard(
+            peer_id=node.runtime_id,
+            verse_id="brokkr.blender",
+            endpoints=(endpoint,),
+            roles=("shard-primary", "editor-host", "read-replica"),
+            shard_ids=("primary",),
+            region="local",
+        ))
+
+        self._server = server
+        self._server_key = server_key
+        return self.server_status()
+
+    def stop_server(self) -> None:
+        if self._server is not None:
+            self._server.stop()
+        self._server = None
+        self._server_key = None
+
+    def server_status(self) -> dict[str, Any]:
+        if self._server is None:
+            return {
+                "running": False,
+                "endpoint": "",
+                "host": "",
+                "port": 0,
+            }
+        return {
+            "running": True,
+            "endpoint": f"cultnet://{self._server.host}:{self._server.port}",
+            "host": self._server.host,
+            "port": self._server.port,
+        }
 
     def capture_snapshot(self, context: Any) -> dict[str, Any]:
         bpy = self.bpy

@@ -22,7 +22,9 @@ The Blender add-on uses CultLib's Python CultMesh runtime as its local mirror
 node. Blender writes typed host snapshots and command receipts through
 registered CultMesh database document definitions, drains command intents from
 the same node database, and only uses loose JSON files as optional debug/export
-probes.
+probes. The add-on can serve the node through `CultMesh.serve_node(...)` so
+external CultNet/CultMesh clients can request schema catalogs, snapshots, shard
+logs, and raw document mutations.
 
 ## Invariants
 
