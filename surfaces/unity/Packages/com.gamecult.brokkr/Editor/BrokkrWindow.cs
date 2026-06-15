@@ -38,6 +38,9 @@ namespace GameCult.Brokkr.Editor
         private string scriptableObjectType = "";
         private string scriptableObjectName = "";
         private string scriptableObjectAssetPath = "Assets/BrokkrAsset.asset";
+        private string prefabAssetPath = "";
+        private string prefabInstanceName = "";
+        private string prefabVariantPath = "Assets/BrokkrPrefabVariant.prefab";
 
         [MenuItem("GameCult/Brokkr")]
         public static void Open()
@@ -65,6 +68,9 @@ namespace GameCult.Brokkr.Editor
             scriptableObjectType = BrokkrSettings.ScriptableObjectType;
             scriptableObjectName = BrokkrSettings.ScriptableObjectName;
             scriptableObjectAssetPath = BrokkrSettings.ScriptableObjectAssetPath;
+            prefabAssetPath = BrokkrSettings.PrefabAssetPath;
+            prefabInstanceName = BrokkrSettings.PrefabInstanceName;
+            prefabVariantPath = BrokkrSettings.PrefabVariantPath;
             Selection.selectionChanged += Repaint;
             EditorSceneManagerBridge.SceneDirtied += OnEditorSignal;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
@@ -110,6 +116,9 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.ScriptableObjectType = scriptableObjectType;
                 BrokkrSettings.ScriptableObjectName = scriptableObjectName;
                 BrokkrSettings.ScriptableObjectAssetPath = scriptableObjectAssetPath;
+                BrokkrSettings.PrefabAssetPath = prefabAssetPath;
+                BrokkrSettings.PrefabInstanceName = prefabInstanceName;
+                BrokkrSettings.PrefabVariantPath = prefabVariantPath;
                 SetStatus("Settings saved.", MessageType.Info);
             }
 
@@ -170,6 +179,24 @@ namespace GameCult.Brokkr.Editor
             if (GUILayout.Button("Create ScriptableObject Asset"))
             {
                 PublishCreateScriptableObjectCommand();
+            }
+
+            EditorGUILayout.Space();
+            prefabAssetPath = EditorGUILayout.TextField("Prefab Asset Path", prefabAssetPath);
+            prefabInstanceName = EditorGUILayout.TextField("Instance Name", prefabInstanceName);
+            prefabVariantPath = EditorGUILayout.TextField("Variant Path", prefabVariantPath);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Instantiate Prefab"))
+                {
+                    PublishInstantiatePrefabCommand();
+                }
+
+                if (GUILayout.Button("Create Prefab Variant"))
+                {
+                    PublishCreatePrefabVariantCommand();
+                }
             }
         }
 
@@ -323,13 +350,73 @@ namespace GameCult.Brokkr.Editor
                         ? "Assets/BrokkrAsset.asset"
                         : scriptableObjectAssetPath.Trim()
                 };
-                mirror.PublishCommandAsync(command).GetAwaiter().GetResult();
-                PollAndExecuteCommand(true);
+                PublishCommandAndPoll(command);
             }
             catch (Exception error)
             {
                 SetStatus(error.Message, MessageType.Error);
             }
+        }
+
+        private void PublishInstantiatePrefabCommand()
+        {
+            try
+            {
+                RequireMirror();
+                if (string.IsNullOrWhiteSpace(prefabAssetPath))
+                {
+                    throw new InvalidOperationException("Enter a prefab asset path before instantiating.");
+                }
+
+                var selected = Selection.activeGameObject;
+                var command = new BrokkrUnityCommand
+                {
+                    commandId = StableId("unity-command", "instantiate-prefab", Guid.NewGuid().ToString("N")),
+                    action = "instantiatePrefab",
+                    assetPath = prefabAssetPath.Trim(),
+                    name = prefabInstanceName.Trim(),
+                    parentObjectId = selected != null ? BrokkrUnitySnapshotBuilder.GetObjectId(selected) : ""
+                };
+                PublishCommandAndPoll(command);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private void PublishCreatePrefabVariantCommand()
+        {
+            try
+            {
+                RequireMirror();
+                if (string.IsNullOrWhiteSpace(prefabAssetPath))
+                {
+                    throw new InvalidOperationException("Enter a prefab asset path before creating a variant.");
+                }
+
+                var command = new BrokkrUnityCommand
+                {
+                    commandId = StableId("unity-command", "prefab-variant", Guid.NewGuid().ToString("N")),
+                    action = "createPrefabVariant",
+                    assetPath = prefabAssetPath.Trim(),
+                    name = prefabInstanceName.Trim(),
+                    value = string.IsNullOrWhiteSpace(prefabVariantPath)
+                        ? "Assets/BrokkrPrefabVariant.prefab"
+                        : prefabVariantPath.Trim()
+                };
+                PublishCommandAndPoll(command);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private void PublishCommandAndPoll(BrokkrUnityCommand command)
+        {
+            mirror.PublishCommandAsync(command).GetAwaiter().GetResult();
+            PollAndExecuteCommand(true);
         }
 
         private void PublishSelectedObjectSync()

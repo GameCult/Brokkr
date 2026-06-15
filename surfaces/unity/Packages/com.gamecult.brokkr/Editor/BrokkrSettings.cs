@@ -115,5 +115,23 @@ namespace GameCult.Brokkr.Editor
             get => EditorPrefs.GetString("GameCult.Brokkr.ScriptableObjectAssetPath", "Assets/BrokkrAsset.asset");
             set => EditorPrefs.SetString("GameCult.Brokkr.ScriptableObjectAssetPath", value);
         }
+
+        internal static string PrefabAssetPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.PrefabAssetPath", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.PrefabAssetPath", value);
+        }
+
+        internal static string PrefabInstanceName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.PrefabInstanceName", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.PrefabInstanceName", value);
+        }
+
+        internal static string PrefabVariantPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.PrefabVariantPath", "Assets/BrokkrPrefabVariant.prefab");
+            set => EditorPrefs.SetString("GameCult.Brokkr.PrefabVariantPath", value);
+        }
     }
 }

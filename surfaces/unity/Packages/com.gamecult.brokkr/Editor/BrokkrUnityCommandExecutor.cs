@@ -174,6 +174,8 @@ namespace GameCult.Brokkr.Editor
                 var baseName = string.IsNullOrWhiteSpace(command.name) ? $"{prefab.name}Variant" : command.name;
                 variantPath = $"Assets/{baseName}.prefab";
             }
+            EnsureAssetFolder(variantPath);
+            variantPath = AssetDatabase.GenerateUniqueAssetPath(variantPath);
 
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
             PrefabUtility.SaveAsPrefabAsset(instance, variantPath);

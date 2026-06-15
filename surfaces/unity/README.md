@@ -32,6 +32,9 @@ In Unity:
 6. Click `Publish Mirror`.
 7. To create a ScriptableObject through the mirror, fill `ScriptableObject Type`,
    `Asset Name`, and `Asset Path`, then click `Create ScriptableObject Asset`.
+8. To instantiate or variant a prefab through the mirror, fill `Prefab Asset
+   Path`, optional `Instance Name`, and optional `Variant Path`, then click the
+   matching prefab command.
 
 The Unity adapter writes the latest editor snapshot to:
 

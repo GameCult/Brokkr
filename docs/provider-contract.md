@@ -110,6 +110,10 @@ write typed command intents; Unity executes recognized intents and publishes
 receipts. `setComponentProperty` writes the target object by default; when
 `componentType` is present, Unity resolves that component on the target
 GameObject and writes the serialized property there.
+`instantiatePrefab` uses `assetPath` as the source prefab, `name` as the
+optional instance name, and `parentObjectId` as the optional parent.
+`createPrefabVariant` uses `assetPath` as the source prefab and `value` as the
+destination prefab path.
 `createScriptableObject` uses `componentType` as the ScriptableObject type and
 `assetPath` as the destination asset path.
 
