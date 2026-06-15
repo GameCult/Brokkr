@@ -83,6 +83,10 @@ Implemented sync lanes:
 - Blender scene camera transform/FOV to a Unity Cinemachine virtual camera
   GameObject/component. The FOV write uses `componentType =
   Cinemachine.CinemachineVirtualCamera` and property path `m_Lens.FieldOfView`.
+- Blender object custom property to Unity serialized property through
+  `setComponentProperty`. The syncvar uses `blenderPropertyPath =
+  customProperties.name` and `unityPropertyPath = Component.Type::propertyPath`
+  when a Unity component should receive the value.
 
 ## Unity Command Actions
 

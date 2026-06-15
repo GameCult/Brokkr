@@ -662,6 +662,7 @@ struct BlenderObject {
     scale: Vec<f64>,
     visible: bool,
     materials: Vec<String>,
+    custom_properties: BTreeMap<String, Value>,
     camera_field_of_view_degrees: Option<f64>,
 }
 
@@ -842,6 +843,56 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         source.visible,
                         material
                     ));
+                }
+                ("blender-to-unity", "custom-property") => {
+                    let Some(source) = blender_objects.get(&binding.blender_object_name) else {
+                        report.messages.push(format!(
+                            "missing Blender object {} for custom-property binding {}",
+                            binding.blender_object_name, binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let blender_property_name =
+                        normalize_blender_custom_property_path(&sync_var.blender_property_path);
+                    let Some(value) = source.custom_properties.get(&blender_property_name) else {
+                        report.messages.push(format!(
+                            "custom-property sync requested for {} but Blender property {} is not present",
+                            binding.blender_object_name, blender_property_name
+                        ));
+                        continue;
+                    };
+                    let (component_type, property_path) =
+                        split_unity_property_target(&sync_var.unity_property_path);
+                    if property_path.is_empty() {
+                        report.messages.push(format!(
+                            "custom-property sync var {} has no Unity property path",
+                            sync_var.sync_var_id
+                        ));
+                        continue;
+                    }
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "blender-to-unity-custom-property",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = unity_property_command(
+                            &command_id,
+                            &binding.unity_object_id,
+                            component_type,
+                            property_path,
+                            &sync_value_to_string(value),
+                        );
+                        if !args.dry_run {
+                            unity_store.put_messagepack_document(
+                                "brokkr.unity.command_intent.v0",
+                                &format!("unity/commands/{command_id}"),
+                                &command,
+                            )?;
+                        }
+                        report.unity_commands_written += 1;
+                    }
                 }
                 _ => report.messages.push(format!(
                     "unsupported sync var {} kind={} authority={} unityPath={} blenderPath={}",
@@ -1171,6 +1222,16 @@ fn parse_blender_objects(documents: &[CacheDocument]) -> BTreeMap<String, Blende
                                 .collect()
                         })
                         .unwrap_or_default(),
+                    custom_properties: value
+                        .get("customProperties")
+                        .and_then(Value::as_object)
+                        .map(|items| {
+                            items
+                                .iter()
+                                .map(|(key, value)| (key.clone(), value.clone()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                     camera_field_of_view_degrees: value
                         .get("camera")
                         .and_then(|camera| field_f64(camera, 1, "fieldOfViewDegrees")),
@@ -1270,6 +1331,29 @@ fn unity_property_command(
         "",
         ""
     ])
+}
+
+fn normalize_blender_custom_property_path(path: &str) -> String {
+    path.trim()
+        .strip_prefix("customProperties.")
+        .unwrap_or_else(|| path.trim())
+        .to_string()
+}
+
+fn split_unity_property_target(path: &str) -> (&str, &str) {
+    path.split_once("::")
+        .map(|(component_type, property_path)| (component_type.trim(), property_path.trim()))
+        .unwrap_or(("", path.trim()))
+}
+
+fn sync_value_to_string(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
 }
 
 fn field_string(value: &Value, slot: usize, name: &str) -> Option<String> {
@@ -1660,6 +1744,51 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn sync_once_writes_blender_custom_property_to_unity_property_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_custom_property_stores(&unity_path, &blender_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 1, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let command = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("unity/commands/"))
+            .expect("Brokkr should emit a Unity property command");
+
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(2)),
+            Some(&json!("setComponentProperty"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(3)),
+            Some(&json!("unity-cube"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(5)),
+            Some(&json!("GameCult.Example.SyncTarget"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(6)),
+            Some(&json!("intensity"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(7)),
+            Some(&json!("0.75"))
+        );
+
+        Ok(())
+    }
+
     fn seed_sync_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
@@ -1726,6 +1855,63 @@ mod tests {
                 "scenes": [{
                     "name": "Scene",
                     "frameCurrent": 48
+                }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    fn seed_custom_property_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityObjectId": "unity-cube",
+                "unityPath": "/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": "blender-to-unity"
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.var.v0",
+            "sync/vars/var-cube-custom-intensity",
+            &json!({
+                "schema": "brokkr.sync.var.v0",
+                "syncVarId": "var-cube-custom-intensity",
+                "sessionId": "session-main",
+                "bindingId": "binding-cube",
+                "displayName": "Intensity",
+                "kind": "custom-property",
+                "unityPropertyPath": "GameCult.Example.SyncTarget::intensity",
+                "blenderPropertyPath": "customProperties.intensity",
+                "authority": "blender-to-unity",
+                "enabled": true
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [{
+                    "name": "Cube",
+                    "type": "MESH",
+                    "location": [0.0, 0.0, 0.0],
+                    "rotationEuler": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0],
+                    "visible": true,
+                    "materials": [],
+                    "customProperties": {
+                        "intensity": 0.75
+                    }
                 }]
             }),
         )?;

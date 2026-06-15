@@ -24,6 +24,7 @@ namespace GameCult.Brokkr.Editor
         private bool syncTransform = true;
         private bool syncActiveState = true;
         private bool syncMaterial;
+        private bool syncCustomProperty;
         private bool syncTimelineFrame = true;
         private bool syncCinemachineCamera = true;
         private float syncTimelineFrameRate = 24.0f;
@@ -31,6 +32,9 @@ namespace GameCult.Brokkr.Editor
         private string unityCinemachineObjectId = "";
         private string blenderSceneName = "";
         private string blenderActionName = "";
+        private string unityCustomPropertyComponentType = "";
+        private string unityCustomPropertyPath = "";
+        private string blenderCustomPropertyPath = "";
 
         [MenuItem("GameCult/Brokkr")]
         public static void Open()
@@ -52,6 +56,9 @@ namespace GameCult.Brokkr.Editor
             unityCinemachineObjectId = BrokkrSettings.UnityCinemachineObjectId;
             blenderSceneName = BrokkrSettings.BlenderSceneName;
             blenderActionName = BrokkrSettings.BlenderActionName;
+            unityCustomPropertyComponentType = BrokkrSettings.UnityCustomPropertyComponentType;
+            unityCustomPropertyPath = BrokkrSettings.UnityCustomPropertyPath;
+            blenderCustomPropertyPath = BrokkrSettings.BlenderCustomPropertyPath;
             Selection.selectionChanged += Repaint;
             EditorSceneManagerBridge.SceneDirtied += OnEditorSignal;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
@@ -91,6 +98,9 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.UnityCinemachineObjectId = unityCinemachineObjectId;
                 BrokkrSettings.BlenderSceneName = blenderSceneName;
                 BrokkrSettings.BlenderActionName = blenderActionName;
+                BrokkrSettings.UnityCustomPropertyComponentType = unityCustomPropertyComponentType;
+                BrokkrSettings.UnityCustomPropertyPath = unityCustomPropertyPath;
+                BrokkrSettings.BlenderCustomPropertyPath = blenderCustomPropertyPath;
                 SetStatus("Settings saved.", MessageType.Info);
             }
 
@@ -151,6 +161,13 @@ namespace GameCult.Brokkr.Editor
             syncTransform = EditorGUILayout.Toggle("Sync Transform", syncTransform);
             syncActiveState = EditorGUILayout.Toggle("Sync Active State", syncActiveState);
             syncMaterial = EditorGUILayout.Toggle("Sync Material", syncMaterial);
+            syncCustomProperty = EditorGUILayout.Toggle("Sync Custom Property", syncCustomProperty);
+            using (new EditorGUI.DisabledScope(!syncCustomProperty))
+            {
+                unityCustomPropertyComponentType = EditorGUILayout.TextField("Unity Component Type", unityCustomPropertyComponentType);
+                unityCustomPropertyPath = EditorGUILayout.TextField("Unity Property Path", unityCustomPropertyPath);
+                blenderCustomPropertyPath = EditorGUILayout.TextField("Blender Custom Property", blenderCustomPropertyPath);
+            }
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -296,6 +313,14 @@ namespace GameCult.Brokkr.Editor
                 PublishSyncVar(bindingId, "transform", "Transform", "m_LocalPosition,m_LocalRotation,m_LocalScale", "location,rotationEuler,scale", syncTransform, "linear", now);
                 PublishSyncVar(bindingId, "active-state", "Active State", "m_IsActive", "visible", syncActiveState, "step", now);
                 PublishSyncVar(bindingId, "material", "Material", "Renderer.m_Materials", "materials", syncMaterial, "step", now);
+                if (syncCustomProperty)
+                {
+                    var unityPath = BuildUnityCustomPropertyPath();
+                    var blenderPath = string.IsNullOrWhiteSpace(blenderCustomPropertyPath)
+                        ? "customProperties.value"
+                        : NormalizeBlenderCustomPropertyPath(blenderCustomPropertyPath);
+                    PublishSyncVar(bindingId, "custom-property", "Custom Property", unityPath, blenderPath, true, "step", now);
+                }
                 SetStatus($"Published Brokkr object sync binding: {binding.displayName}", MessageType.Info);
             }
             catch (Exception error)
@@ -378,7 +403,9 @@ namespace GameCult.Brokkr.Editor
                 kind = kind,
                 unityPropertyPath = unityPropertyPath,
                 blenderPropertyPath = blenderPropertyPath,
-                authority = kind.StartsWith("timeline", StringComparison.Ordinal) ? "blender-to-unity" : "unity-to-blender",
+                authority = kind.StartsWith("timeline", StringComparison.Ordinal) || kind == "custom-property"
+                    ? "blender-to-unity"
+                    : "unity-to-blender",
                 enabled = enabled,
                 interpolation = interpolation,
                 updatedAt = updatedAt
@@ -396,6 +423,24 @@ namespace GameCult.Brokkr.Editor
             }
 
             return path;
+        }
+
+        private string BuildUnityCustomPropertyPath()
+        {
+            var propertyPath = string.IsNullOrWhiteSpace(unityCustomPropertyPath)
+                ? "value"
+                : unityCustomPropertyPath.Trim();
+            return string.IsNullOrWhiteSpace(unityCustomPropertyComponentType)
+                ? propertyPath
+                : $"{unityCustomPropertyComponentType.Trim()}::{propertyPath}";
+        }
+
+        private static string NormalizeBlenderCustomPropertyPath(string path)
+        {
+            var trimmed = path.Trim();
+            return trimmed.StartsWith("customProperties.", StringComparison.Ordinal)
+                ? trimmed
+                : $"customProperties.{trimmed}";
         }
 
         private static string StableId(params string[] parts)

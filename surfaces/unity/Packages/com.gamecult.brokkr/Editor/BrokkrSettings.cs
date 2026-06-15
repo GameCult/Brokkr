@@ -79,5 +79,23 @@ namespace GameCult.Brokkr.Editor
             get => EditorPrefs.GetString("GameCult.Brokkr.BlenderActionName", "");
             set => EditorPrefs.SetString("GameCult.Brokkr.BlenderActionName", value);
         }
+
+        internal static string UnityCustomPropertyComponentType
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.UnityCustomPropertyComponentType", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.UnityCustomPropertyComponentType", value);
+        }
+
+        internal static string UnityCustomPropertyPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.UnityCustomPropertyPath", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.UnityCustomPropertyPath", value);
+        }
+
+        internal static string BlenderCustomPropertyPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.BlenderCustomPropertyPath", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.BlenderCustomPropertyPath", value);
+        }
     }
 }

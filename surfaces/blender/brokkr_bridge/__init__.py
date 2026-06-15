@@ -136,6 +136,24 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Synchronize Blender custom properties as sync vars",
     )
 
+    unity_custom_property_component_type: bpy.props.StringProperty(
+        name="Unity Custom Component",
+        default="",
+        description="Optional Unity component type for custom property sync",
+    )
+
+    unity_custom_property_path: bpy.props.StringProperty(
+        name="Unity Custom Property",
+        default="",
+        description="Unity serialized property path receiving the Blender custom property",
+    )
+
+    blender_custom_property_path: bpy.props.StringProperty(
+        name="Blender Custom Property",
+        default="",
+        description="Blender custom property name to sync",
+    )
+
     unity_timeline_object_id: bpy.props.StringProperty(
         name="Unity Timeline Object",
         default="",
@@ -184,6 +202,9 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "sync_transform")
         layout.prop(self, "sync_material")
         layout.prop(self, "sync_custom_properties")
+        layout.prop(self, "unity_custom_property_component_type")
+        layout.prop(self, "unity_custom_property_path")
+        layout.prop(self, "blender_custom_property_path")
         layout.prop(self, "unity_timeline_object_id")
         layout.prop(self, "unity_cinemachine_object_id")
         layout.prop(self, "blender_action_name")
@@ -316,6 +337,9 @@ class BROKKR_OT_publish_object_sync(bpy.types.Operator):
             prefs.sync_transform,
             prefs.sync_material,
             prefs.sync_custom_properties,
+            prefs.unity_custom_property_component_type,
+            prefs.unity_custom_property_path,
+            prefs.blender_custom_property_path,
         )
         self.report({"INFO"}, f"Brokkr object sync: {binding['displayName']}")
         return {"FINISHED"}

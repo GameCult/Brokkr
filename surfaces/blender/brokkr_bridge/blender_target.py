@@ -127,6 +127,9 @@ class BrokkrBlenderTarget:
         sync_transform: bool,
         sync_material: bool,
         sync_custom_properties: bool,
+        unity_custom_property_component_type: str = "",
+        unity_custom_property_path: str = "",
+        blender_custom_property_path: str = "",
     ) -> dict[str, Any]:
         obj = context.active_object
         if obj is None:
@@ -155,7 +158,12 @@ class BrokkrBlenderTarget:
         node.database.put(documents["sync_object_binding"], f"sync/bindings/objects/{binding_id}", binding)
         self._put_sync_var(node, documents, normalized_session_id, binding_id, "transform", "Transform", "Transform", "location,rotationEuler,scale", "blender-to-unity", sync_transform, "linear", now)
         self._put_sync_var(node, documents, normalized_session_id, binding_id, "material", "Material", "Renderer.m_Materials", "materials", "blender-to-unity", sync_material, "step", now)
-        self._put_sync_var(node, documents, normalized_session_id, binding_id, "custom-property", "Custom Properties", "Component.Property", "customProperties", "blender-to-unity", sync_custom_properties, "step", now)
+        unity_custom_path = _unity_custom_property_path(
+            unity_custom_property_component_type,
+            unity_custom_property_path,
+        )
+        blender_custom_path = _blender_custom_property_path(blender_custom_property_path)
+        self._put_sync_var(node, documents, normalized_session_id, binding_id, "custom-property", "Custom Property", unity_custom_path, blender_custom_path, "blender-to-unity", sync_custom_properties, "step", now)
         return binding
 
     def publish_timeline_sync(
@@ -644,6 +652,21 @@ def _sync_session(session_id: str, display_name: str, updated_at: str) -> dict[s
         "createdAt": updated_at,
         "updatedAt": updated_at,
     }
+
+
+def _unity_custom_property_path(component_type: str, property_path: str) -> str:
+    property_path = (property_path or "value").strip()
+    component_type = (component_type or "").strip()
+    if not component_type:
+        return property_path
+    return f"{component_type}::{property_path}"
+
+
+def _blender_custom_property_path(property_path: str) -> str:
+    property_path = (property_path or "value").strip()
+    if property_path.startswith("customProperties."):
+        return property_path
+    return f"customProperties.{property_path}"
 
 
 def _stable_id(*parts: str) -> str:
