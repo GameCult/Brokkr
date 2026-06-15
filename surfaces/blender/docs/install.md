@@ -38,7 +38,8 @@ owns the mirror state.
 4. Inspect `.brokkr/blender-editor.ccmp`.
 5. Drop a command intent JSON file into
    `.brokkr/blender-editor-debug/blender/commands/{commandId}.json`.
-6. Click `Drain Commands`.
+6. Click `Drain Commands`, or enable `Auto Drain Commands` to poll command
+   intents once per second while the add-on is loaded.
 7. Inspect `.brokkr/blender-editor.ccmp` or the optional debug export
    at `.brokkr/blender-editor-debug/blender/receipts/{commandId}.json`.
 8. Click `Start Server`.
@@ -51,7 +52,8 @@ owns the mirror state.
     Blender frame/action data and Unity Timeline/Cinemachine lanes.
 12. After running `brokkr-daemon sync-once` or `sync-loop`, click
     `Refresh Sync Receipt` to show the latest daemon sync pass observed in the
-    Blender mirror.
+    Blender mirror. Keep `Auto Drain Commands` enabled while `sync-loop` is
+    running if Blender should continuously consume daemon command intents.
 13. To publish an ad hoc sync variable, fill the `Ad Hoc Sync Var` fields in
     the sidebar or add-on preferences and click `Publish Sync Var`.
 

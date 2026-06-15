@@ -66,6 +66,12 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Capture and publish a Blender host snapshot on dependency graph updates",
     )
 
+    auto_drain_commands: bpy.props.BoolProperty(
+        name="Auto Drain Commands",
+        default=False,
+        description="Poll and execute pending Brokkr Blender command intents on a timer",
+    )
+
     serve_host: bpy.props.StringProperty(
         name="Serve Host",
         default="127.0.0.1",
@@ -251,6 +257,7 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "cultlib_py_src")
         layout.prop(self, "debug_mirror_root")
         layout.prop(self, "auto_capture")
+        layout.prop(self, "auto_drain_commands")
         layout.prop(self, "serve_host")
         layout.prop(self, "serve_port")
         layout.prop(self, "max_snapshot_documents")
@@ -304,6 +311,7 @@ class BROKKR_PT_status(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("brokkr.capture_snapshot", icon="FILE_REFRESH")
         row.operator("brokkr.drain_commands", icon="PLAY")
+        layout.prop(prefs, "auto_drain_commands")
 
         server_row = layout.row(align=True)
         server_row.operator("brokkr.start_server", icon="NETWORK_DRIVE")
@@ -336,6 +344,11 @@ class BROKKR_PT_status(bpy.types.Panel):
             layout.separator()
             layout.label(text=f"Last receipt: {adapter.last_receipt.get('status', '')}")
             layout.label(text=adapter.last_receipt.get("message", ""))
+
+        if adapter.last_auto_drain_error:
+            layout.separator()
+            layout.label(text="Auto drain error:")
+            layout.label(text=adapter.last_auto_drain_error)
 
         if adapter.last_sync_receipt:
             layout.separator()
@@ -515,6 +528,32 @@ def _auto_capture(scene, depsgraph):
     )
 
 
+def _auto_drain_commands():
+    context = bpy.context
+    addon = context.preferences.addons.get(__name__)
+    adapter = target()
+    if not addon:
+        return 1.0
+
+    prefs = addon.preferences
+    if not prefs.auto_drain_commands:
+        adapter.last_auto_drain_error = ""
+        return 1.0
+
+    try:
+        adapter.drain_commands(
+            context,
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+            prefs.debug_mirror_root,
+        )
+        adapter.last_auto_drain_error = ""
+    except Exception as exc:
+        adapter.last_auto_drain_error = str(exc)
+
+    return 1.0
+
+
 classes = (
     BrokkrPreferences,
     BROKKR_PT_status,
@@ -534,11 +573,15 @@ def register():
         bpy.utils.register_class(cls)
     if _auto_capture not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_auto_capture)
+    if not bpy.app.timers.is_registered(_auto_drain_commands):
+        bpy.app.timers.register(_auto_drain_commands, first_interval=1.0, persistent=True)
 
 
 def unregister():
     if _auto_capture in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_auto_capture)
+    if bpy.app.timers.is_registered(_auto_drain_commands):
+        bpy.app.timers.unregister(_auto_drain_commands)
     global _target
     if _target is not None:
         _target.stop_server()

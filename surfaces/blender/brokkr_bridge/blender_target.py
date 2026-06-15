@@ -52,6 +52,7 @@ class BrokkrBlenderTarget:
         self.last_snapshot: dict[str, Any] | None = None
         self.last_receipt: dict[str, Any] | None = None
         self.last_sync_receipt: dict[str, Any] | None = None
+        self.last_auto_drain_error: str = ""
         self._node_key: tuple[str, str, str] | None = None
         self._node: Any | None = None
         self._documents: dict[str, Any] | None = None
