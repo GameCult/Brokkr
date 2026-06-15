@@ -130,6 +130,12 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Synchronize material assignment",
     )
 
+    sync_visibility: bpy.props.BoolProperty(
+        name="Sync Visibility",
+        default=True,
+        description="Synchronize Blender object visibility to Unity active state",
+    )
+
     sync_custom_properties: bpy.props.BoolProperty(
         name="Sync Custom Properties",
         default=False,
@@ -201,6 +207,7 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "unity_object_path")
         layout.prop(self, "sync_transform")
         layout.prop(self, "sync_material")
+        layout.prop(self, "sync_visibility")
         layout.prop(self, "sync_custom_properties")
         layout.prop(self, "unity_custom_property_component_type")
         layout.prop(self, "unity_custom_property_path")
@@ -336,6 +343,7 @@ class BROKKR_OT_publish_object_sync(bpy.types.Operator):
             prefs.unity_object_path,
             prefs.sync_transform,
             prefs.sync_material,
+            prefs.sync_visibility,
             prefs.sync_custom_properties,
             prefs.unity_custom_property_component_type,
             prefs.unity_custom_property_path,

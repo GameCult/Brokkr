@@ -901,6 +901,36 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         report.unity_commands_written += 1;
                     }
                 }
+                ("blender-to-unity", "active-state") => {
+                    let Some(source) = blender_objects.get(&binding.blender_object_name) else {
+                        report.messages.push(format!(
+                            "missing Blender object {} for active-state binding {}",
+                            binding.blender_object_name, binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "blender-to-unity-active",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = unity_active_command(
+                            &command_id,
+                            &binding.unity_object_id,
+                            source.visible,
+                        );
+                        if !args.dry_run {
+                            unity_store.put_messagepack_document(
+                                "brokkr.unity.command_intent.v0",
+                                &format!("unity/commands/{command_id}"),
+                                &command,
+                            )?;
+                        }
+                        report.unity_commands_written += 1;
+                    }
+                }
                 ("blender-to-unity", "material") => {
                     let Some(source) = blender_objects.get(&binding.blender_object_name) else {
                         report.messages.push(format!(
@@ -1503,6 +1533,24 @@ fn unity_material_command(command_id: &str, target_object_id: &str, material_nam
     ])
 }
 
+fn unity_active_command(command_id: &str, target_object_id: &str, active: bool) -> Value {
+    json!([
+        "brokkr.unity.command_intent.v0",
+        command_id,
+        "setGameObjectActive",
+        target_object_id,
+        "",
+        "",
+        "",
+        active.to_string(),
+        "",
+        "",
+        "",
+        "",
+        ""
+    ])
+}
+
 fn normalize_blender_custom_property_path(path: &str) -> String {
     path.trim()
         .strip_prefix("customProperties.")
@@ -2003,6 +2051,43 @@ mod tests {
     }
 
     #[test]
+    fn sync_once_writes_blender_visibility_to_unity_active_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_visibility_stores(&unity_path, &blender_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 1, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let command = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("unity/commands/"))
+            .expect("Brokkr should emit a Unity active-state command");
+
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(2)),
+            Some(&json!("setGameObjectActive"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(3)),
+            Some(&json!("unity-cube"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(7)),
+            Some(&json!("false"))
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn sync_once_writes_unity_component_property_to_blender_custom_property_command() -> Result<()>
     {
         let temp = tempfile::tempdir()?;
@@ -2152,6 +2237,60 @@ mod tests {
                     "scale": [1.0, 1.0, 1.0],
                     "visible": true,
                     "materials": ["Obsidian"]
+                }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    fn seed_visibility_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityObjectId": "unity-cube",
+                "unityPath": "/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": "blender-to-unity"
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.var.v0",
+            "sync/vars/var-cube-active",
+            &json!({
+                "schema": "brokkr.sync.var.v0",
+                "syncVarId": "var-cube-active",
+                "sessionId": "session-main",
+                "bindingId": "binding-cube",
+                "displayName": "Active State",
+                "kind": "active-state",
+                "unityPropertyPath": "m_IsActive",
+                "blenderPropertyPath": "visible",
+                "authority": "blender-to-unity",
+                "enabled": true
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [{
+                    "name": "Cube",
+                    "type": "MESH",
+                    "location": [0.0, 0.0, 0.0],
+                    "rotationEuler": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0],
+                    "visible": false,
+                    "materials": []
                 }]
             }),
         )?;

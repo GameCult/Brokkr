@@ -79,6 +79,8 @@ Implemented sync lanes:
 
 - Unity GameObject transform to Blender object transform.
 - Unity GameObject active state to Blender object visibility.
+- Blender object visibility to Unity GameObject active state through
+  `setGameObjectActive`.
 - Unity serialized component property to Blender object custom property through
   `setObjectCustomProperty`. The syncvar uses `unityPropertyPath =
   Component.Type::propertyPath` and `blenderPropertyPath = customProperties.name`.
@@ -102,6 +104,7 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 - `createGameObject`
 - `attachComponent`
 - `setGameObjectTransform`
+- `setGameObjectActive`
 - `setComponentProperty`
 - `instantiatePrefab`
 - `createPrefabVariant`
@@ -113,6 +116,7 @@ write typed command intents; Unity executes recognized intents and publishes
 receipts. `setComponentProperty` writes the target object by default; when
 `componentType` is present, Unity resolves that component on the target
 GameObject and writes the serialized property there.
+`setGameObjectActive` uses `targetObjectId` and boolean `value`.
 `instantiatePrefab` uses `assetPath` as the source prefab, `name` as the
 optional instance name, and `parentObjectId` as the optional parent.
 `createPrefabVariant` uses `assetPath` as the source prefab and `value` as the
