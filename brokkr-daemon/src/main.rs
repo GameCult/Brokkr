@@ -217,6 +217,7 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "asset.catalog.read",
                     "asset.prefab.instantiate",
                     "asset.prefab.variant.create",
+                    "material.assign",
                     "gameobject.create",
                     "component.attach",
                     "component.property.write",
@@ -832,17 +833,37 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                 }
                 ("blender-to-unity", "material") => {
                     let Some(source) = blender_objects.get(&binding.blender_object_name) else {
+                        report.messages.push(format!(
+                            "missing Blender object {} for material binding {}",
+                            binding.blender_object_name, binding.binding_id
+                        ));
                         continue;
                     };
-                    let material = source.materials.first().cloned().unwrap_or_default();
-                    report.messages.push(format!(
-                        "material sync requested for {} -> {} (source name={}, visible={}, material={}) but Unity material import mapping is not implemented yet",
-                        binding.blender_object_name,
-                        binding.unity_object_id,
-                        source.name,
-                        source.visible,
-                        material
-                    ));
+                    let Some(material) = source.materials.first() else {
+                        report.messages.push(format!(
+                            "material sync requested for {} but no Blender material is assigned (source visible={})",
+                            binding.blender_object_name, source.visible
+                        ));
+                        continue;
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "blender-to-unity-material",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command =
+                            unity_material_command(&command_id, &binding.unity_object_id, material);
+                        if !args.dry_run {
+                            unity_store.put_messagepack_document(
+                                "brokkr.unity.command_intent.v0",
+                                &format!("unity/commands/{command_id}"),
+                                &command,
+                            )?;
+                        }
+                        report.unity_commands_written += 1;
+                    }
                 }
                 ("blender-to-unity", "custom-property") => {
                     let Some(source) = blender_objects.get(&binding.blender_object_name) else {
@@ -1333,6 +1354,24 @@ fn unity_property_command(
     ])
 }
 
+fn unity_material_command(command_id: &str, target_object_id: &str, material_name: &str) -> Value {
+    json!([
+        "brokkr.unity.command_intent.v0",
+        command_id,
+        "assignMaterial",
+        target_object_id,
+        material_name,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+    ])
+}
+
 fn normalize_blender_custom_property_path(path: &str) -> String {
     path.trim()
         .strip_prefix("customProperties.")
@@ -1456,6 +1495,7 @@ mod tests {
         assert!(unity.capabilities.contains(&"quest.input.consume"));
         assert!(unity.capabilities.contains(&"quest.pose.consume"));
         assert!(unity.capabilities.contains(&"quest.video_input.publish"));
+        assert!(unity.capabilities.contains(&"material.assign"));
         assert!(!blender.capabilities.contains(&"quest.input.consume"));
         assert!(blender.capabilities.contains(&"object.graph.read"));
         assert!(blender.capabilities.contains(&"object.transform.write"));
@@ -1789,6 +1829,43 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn sync_once_writes_blender_material_to_unity_assign_material_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_material_stores(&unity_path, &blender_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 1, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let command = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("unity/commands/"))
+            .expect("Brokkr should emit a Unity material command");
+
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(2)),
+            Some(&json!("assignMaterial"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(3)),
+            Some(&json!("unity-cube"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(4)),
+            Some(&json!("Obsidian"))
+        );
+
+        Ok(())
+    }
+
     fn seed_sync_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
@@ -1855,6 +1932,60 @@ mod tests {
                 "scenes": [{
                     "name": "Scene",
                     "frameCurrent": 48
+                }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    fn seed_material_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityObjectId": "unity-cube",
+                "unityPath": "/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": "blender-to-unity"
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.var.v0",
+            "sync/vars/var-cube-material",
+            &json!({
+                "schema": "brokkr.sync.var.v0",
+                "syncVarId": "var-cube-material",
+                "sessionId": "session-main",
+                "bindingId": "binding-cube",
+                "displayName": "Material",
+                "kind": "material",
+                "unityPropertyPath": "Renderer.m_Materials",
+                "blenderPropertyPath": "materials",
+                "authority": "blender-to-unity",
+                "enabled": true
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [{
+                    "name": "Cube",
+                    "type": "MESH",
+                    "location": [0.0, 0.0, 0.0],
+                    "rotationEuler": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0],
+                    "visible": true,
+                    "materials": ["Obsidian"]
                 }]
             }),
         )?;

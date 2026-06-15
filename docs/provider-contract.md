@@ -79,6 +79,8 @@ Implemented sync lanes:
 - Unity GameObject transform to Blender object transform.
 - Unity GameObject active state to Blender object visibility.
 - Blender object transform to Unity GameObject transform.
+- Blender object material name to Unity Renderer material assignment through
+  `assignMaterial`.
 - Blender scene frame to Unity timeline time through `setComponentProperty`.
 - Blender scene camera transform/FOV to a Unity Cinemachine virtual camera
   GameObject/component. The FOV write uses `componentType =
@@ -99,6 +101,7 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 - `setComponentProperty`
 - `instantiatePrefab`
 - `createPrefabVariant`
+- `assignMaterial`
 
 Unity owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Unity executes recognized intents and publishes

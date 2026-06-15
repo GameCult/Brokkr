@@ -22,6 +22,7 @@ namespace GameCult.Brokkr.Editor
                     "setComponentProperty" => SetComponentProperty(command),
                     "instantiatePrefab" => InstantiatePrefab(command),
                     "createPrefabVariant" => CreatePrefabVariant(command),
+                    "assignMaterial" => AssignMaterial(command),
                     _ => Failed(command, $"Unsupported Unity command action: {command.action}")
                 };
             }
@@ -181,6 +182,28 @@ namespace GameCult.Brokkr.Editor
             return Accepted(command, $"Prefab variant saved: {variantPath}", variantPath);
         }
 
+        private static BrokkrUnityCommandReceipt AssignMaterial(BrokkrUnityCommand command)
+        {
+            var gameObject = ResolveGameObject(command.targetObjectId);
+            if (gameObject == null)
+            {
+                return Failed(command, "Target GameObject was not found.");
+            }
+
+            var renderer = gameObject.GetComponent<Renderer>();
+            if (renderer == null)
+            {
+                return Failed(command, "Target GameObject has no Renderer component.");
+            }
+
+            var material = ResolveMaterial(command);
+            Undo.RecordObject(renderer, "Brokkr Assign Material");
+            renderer.sharedMaterial = material;
+            EditorUtility.SetDirty(renderer);
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+            return Accepted(command, $"Material assigned: {material.name}", command.targetObjectId);
+        }
+
         private static GameObject ResolveGameObject(string objectId)
         {
             var target = BrokkrUnitySnapshotBuilder.ResolveObjectId(objectId);
@@ -236,6 +259,54 @@ namespace GameCult.Brokkr.Editor
             return string.Equals(type.FullName, requestedType, StringComparison.Ordinal)
                 || string.Equals(type.Name, requestedType, StringComparison.Ordinal)
                 || string.Equals(type.AssemblyQualifiedName, requestedType, StringComparison.Ordinal);
+        }
+
+        private static Material ResolveMaterial(BrokkrUnityCommand command)
+        {
+            if (!string.IsNullOrWhiteSpace(command.assetPath))
+            {
+                var materialAtPath = AssetDatabase.LoadAssetAtPath<Material>(command.assetPath);
+                if (materialAtPath != null)
+                {
+                    return materialAtPath;
+                }
+            }
+
+            var materialName = string.IsNullOrWhiteSpace(command.name) ? "Brokkr Material" : command.name.Trim();
+            var materialGuid = AssetDatabase
+                .FindAssets($"{materialName} t:Material")
+                .FirstOrDefault(guid =>
+                {
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+                    var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+                    return material != null && string.Equals(material.name, materialName, StringComparison.Ordinal);
+                });
+            if (!string.IsNullOrEmpty(materialGuid))
+            {
+                var path = AssetDatabase.GUIDToAssetPath(materialGuid);
+                var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (material != null)
+                {
+                    return material;
+                }
+            }
+
+            var shader = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null)
+            {
+                throw new InvalidOperationException("No default Unity material shader is available.");
+            }
+
+            var created = new Material(shader)
+            {
+                name = materialName
+            };
+            var assetName = string.Join("_", materialName.Split(System.IO.Path.GetInvalidFileNameChars()));
+            var assetPath = $"Assets/{assetName}.mat";
+            AssetDatabase.CreateAsset(created, AssetDatabase.GenerateUniqueAssetPath(assetPath));
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            return created;
         }
 
         private static void AttachParent(GameObject gameObject, string parentObjectId)
