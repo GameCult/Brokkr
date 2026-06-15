@@ -54,6 +54,7 @@ namespace GameCult.Brokkr
         [Key(10)] public string localPosition = "";
         [Key(11)] public string localEulerAngles = "";
         [Key(12)] public string localScale = "";
+        [Key(13)] public string[] materialNames = Array.Empty<string>();
     }
 
     [MessagePackObject]

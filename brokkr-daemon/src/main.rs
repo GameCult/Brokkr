@@ -653,6 +653,7 @@ struct UnityObject {
     local_position: Vec<f64>,
     local_euler_angles: Vec<f64>,
     local_scale: Vec<f64>,
+    materials: Vec<String>,
     components: Vec<UnityComponent>,
 }
 
@@ -808,6 +809,43 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                                     "blender/commands/{}",
                                     command["commandId"].as_str().unwrap_or("sync")
                                 ),
+                                &command,
+                            )?;
+                        }
+                        report.blender_commands_written += 1;
+                    }
+                }
+                ("unity-to-blender", "material") => {
+                    let Some(source) = find_unity_object(&unity_objects, binding) else {
+                        report.messages.push(format!(
+                            "missing Unity object for material binding {}",
+                            binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let Some(material) = source.materials.first() else {
+                        report.messages.push(format!(
+                            "material sync requested for {} but no Unity material is assigned",
+                            source.name
+                        ));
+                        continue;
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "unity-to-blender-material",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = blender_material_command(
+                            &command_id,
+                            &binding.blender_object_name,
+                            material,
+                        );
+                        if !args.dry_run {
+                            blender_store.put_json_document(
+                                "brokkr.blender.command_intent.v0",
+                                &format!("blender/commands/{command_id}"),
                                 &command,
                             )?;
                         }
@@ -1303,6 +1341,14 @@ fn parse_unity_objects(documents: &[CacheDocument]) -> Vec<UnityObject> {
                 local_euler_angles: field_vec3(value, 11, "localEulerAngles").unwrap_or_default(),
                 local_scale: field_vec3(value, 12, "localScale")
                     .unwrap_or_else(|| vec![1.0, 1.0, 1.0]),
+                materials: field_array(value, 13, "materialNames")
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 components: parse_unity_components(value),
             })
         })
@@ -1529,6 +1575,20 @@ fn unity_material_command(command_id: &str, target_object_id: &str, material_nam
         "",
         ""
     ])
+}
+
+fn blender_material_command(
+    command_id: &str,
+    target_object_name: &str,
+    material_name: &str,
+) -> Value {
+    json!({
+        "schema": "brokkr.blender.command_intent.v0",
+        "commandId": command_id,
+        "action": "assignMaterial",
+        "targetObjectName": target_object_name,
+        "materialName": material_name,
+    })
 }
 
 fn unity_active_command(command_id: &str, target_object_id: &str, active: bool) -> Value {
@@ -2083,7 +2143,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let unity_path = temp.path().join("unity.ccmp");
         let blender_path = temp.path().join("blender.ccmp");
-        seed_material_stores(&unity_path, &blender_path)?;
+        seed_material_stores(&unity_path, &blender_path, "blender-to-unity")?;
 
         let report = run_sync_once(&SyncArgs {
             unity_cache: unity_path.clone(),
@@ -2111,6 +2171,34 @@ mod tests {
             command.value.as_array().and_then(|items| items.get(4)),
             Some(&json!("Obsidian"))
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_once_writes_unity_material_to_blender_assign_material_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_material_stores(&unity_path, &blender_path, "unity-to-blender")?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path,
+            blender_cache: blender_path.clone(),
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.blender_commands_written, 1, "{report:#?}");
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        let command = blender_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("blender/commands/"))
+            .expect("Brokkr should emit a Blender material command");
+
+        assert_eq!(command.value["action"], "assignMaterial");
+        assert_eq!(command.value["targetObjectName"], "Cube");
+        assert_eq!(command.value["materialName"], "UnityGold");
 
         Ok(())
     }
@@ -2284,10 +2372,26 @@ mod tests {
         Ok(())
     }
 
-    fn seed_material_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+    fn seed_material_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
 
+        unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({
+                "sceneObjects": [{
+                    "objectId": "unity-cube",
+                    "name": "Cube",
+                    "path": "/Cube",
+                    "activeSelf": true,
+                    "localPosition": [0.0, 0.0, 0.0],
+                    "localEulerAngles": [0.0, 0.0, 0.0],
+                    "localScale": [1.0, 1.0, 1.0],
+                    "materialNames": ["UnityGold"]
+                }]
+            }),
+        )?;
         unity_store.put_json_document(
             "brokkr.sync.object_binding.v0",
             "sync/bindings/objects/binding-cube",
@@ -2300,7 +2404,7 @@ mod tests {
                 "unityPath": "/Cube",
                 "blenderObjectName": "Cube",
                 "enabled": true,
-                "authority": "blender-to-unity"
+                "authority": authority
             }),
         )?;
         unity_store.put_json_document(
@@ -2315,7 +2419,7 @@ mod tests {
                 "kind": "material",
                 "unityPropertyPath": "Renderer.m_Materials",
                 "blenderPropertyPath": "materials",
-                "authority": "blender-to-unity",
+                "authority": authority,
                 "enabled": true
             }),
         )?;

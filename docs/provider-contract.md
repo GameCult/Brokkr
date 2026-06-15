@@ -88,6 +88,8 @@ Implemented sync lanes:
 
 - Unity GameObject transform to Blender object transform.
 - Unity GameObject active state to Blender object visibility.
+- Unity Renderer material name to Blender object material assignment through
+  `assignMaterial`.
 - Blender object visibility to Unity GameObject active state through
   `setGameObjectActive`.
 - Unity serialized component property to Blender object custom property through

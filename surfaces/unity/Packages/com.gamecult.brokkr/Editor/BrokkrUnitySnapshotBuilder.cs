@@ -90,7 +90,8 @@ namespace GameCult.Brokkr.Editor
                 components = CaptureComponents(gameObject),
                 localPosition = WriteVector3(gameObject.transform.localPosition),
                 localEulerAngles = WriteVector3(gameObject.transform.localEulerAngles),
-                localScale = WriteVector3(gameObject.transform.localScale)
+                localScale = WriteVector3(gameObject.transform.localScale),
+                materialNames = CaptureMaterialNames(gameObject)
             });
 
             for (var childIndex = 0; childIndex < gameObject.transform.childCount; childIndex++)
@@ -113,6 +114,17 @@ namespace GameCult.Brokkr.Editor
                     properties = CaptureProperties(component)
                 })
                 .ToArray();
+        }
+
+        private static string[] CaptureMaterialNames(GameObject gameObject)
+        {
+            var renderer = gameObject.GetComponent<Renderer>();
+            return renderer == null
+                ? Array.Empty<string>()
+                : renderer.sharedMaterials
+                    .Where(material => material != null)
+                    .Select(material => material.name)
+                    .ToArray();
         }
 
         private static BrokkrSerializedPropertySnapshot[] CaptureProperties(UnityEngine.Object target)
