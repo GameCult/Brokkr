@@ -62,6 +62,10 @@ Primary sync documents:
 - `brokkr.sync.var.v0`: per-lane sync options such as transform, material,
   component property, custom property, timeline frame, camera lens, or
   Cinemachine virtual camera.
+  Editor surfaces may also publish ad hoc sync vars with an explicit kind,
+  paths, authority, enabled flag, and interpolation. The daemon executes
+  implemented kinds and preserves unsupported kinds as typed sync policy for
+  external consumers.
 - `brokkr.sync.timeline_binding.v0`: Blender scene/action timeline to Unity
   Timeline/Cinemachine correspondence.
 - `brokkr.sync.receipt.v0`: daemon sync pass receipts.

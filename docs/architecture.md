@@ -103,6 +103,8 @@ Derived State:
 - Blender JSON debug exports are inspection/import probes, not mirror authority.
 - Unity and Blender sync UI fields are command/edit affordances; the
   `brokkr.sync.*` documents are the shared sync policy surface.
+- Ad hoc syncvar editors write `brokkr.sync.var.v0` policy records only; they
+  do not make an unsupported kind executable inside the daemon.
 - Editor selection and scene summaries are observations until command receipts
   confirm an accepted mutation.
 - Daemon stdout reports are telemetry, not durable sync state. The durable state

@@ -51,6 +51,8 @@ owns the mirror state.
 12. After running `brokkr-daemon sync-once` or `sync-loop`, click
     `Refresh Sync Receipt` to show the latest daemon sync pass observed in the
     Blender mirror.
+13. To publish an ad hoc sync variable, fill the `Ad Hoc Sync Var` fields in
+    the sidebar or add-on preferences and click `Publish Sync Var`.
 
 Admitted command actions:
 

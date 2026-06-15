@@ -151,5 +151,53 @@ namespace GameCult.Brokkr.Editor
             get => EditorPrefs.GetString("GameCult.Brokkr.PrefabVariantPath", "Assets/BrokkrPrefabVariant.prefab");
             set => EditorPrefs.SetString("GameCult.Brokkr.PrefabVariantPath", value);
         }
+
+        internal static string AdHocSyncVarBindingId
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarBindingId", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.AdHocSyncVarBindingId", value);
+        }
+
+        internal static string AdHocSyncVarKind
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarKind", "custom-property");
+            set => EditorPrefs.SetString("GameCult.Brokkr.AdHocSyncVarKind", value);
+        }
+
+        internal static string AdHocSyncVarDisplayName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarDisplayName", "Custom Property");
+            set => EditorPrefs.SetString("GameCult.Brokkr.AdHocSyncVarDisplayName", value);
+        }
+
+        internal static string AdHocSyncVarUnityPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarUnityPath", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.AdHocSyncVarUnityPath", value);
+        }
+
+        internal static string AdHocSyncVarBlenderPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarBlenderPath", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.AdHocSyncVarBlenderPath", value);
+        }
+
+        internal static string AdHocSyncVarAuthority
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarAuthority", "blender-to-unity");
+            set => EditorPrefs.SetString("GameCult.Brokkr.AdHocSyncVarAuthority", value);
+        }
+
+        internal static string AdHocSyncVarInterpolation
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarInterpolation", "step");
+            set => EditorPrefs.SetString("GameCult.Brokkr.AdHocSyncVarInterpolation", value);
+        }
+
+        internal static bool AdHocSyncVarEnabled
+        {
+            get => EditorPrefs.GetBool("GameCult.Brokkr.AdHocSyncVarEnabled", true);
+            set => EditorPrefs.SetBool("GameCult.Brokkr.AdHocSyncVarEnabled", value);
+        }
     }
 }

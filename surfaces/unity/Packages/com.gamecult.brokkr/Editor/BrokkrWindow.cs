@@ -46,6 +46,14 @@ namespace GameCult.Brokkr.Editor
         private string prefabAssetPath = "";
         private string prefabInstanceName = "";
         private string prefabVariantPath = "Assets/BrokkrPrefabVariant.prefab";
+        private string adHocSyncVarBindingId = "";
+        private string adHocSyncVarKind = "custom-property";
+        private string adHocSyncVarDisplayName = "Custom Property";
+        private string adHocSyncVarUnityPath = "";
+        private string adHocSyncVarBlenderPath = "";
+        private string adHocSyncVarAuthority = "blender-to-unity";
+        private string adHocSyncVarInterpolation = "step";
+        private bool adHocSyncVarEnabled = true;
 
         [MenuItem("GameCult/Brokkr")]
         public static void Open()
@@ -79,6 +87,14 @@ namespace GameCult.Brokkr.Editor
             prefabAssetPath = BrokkrSettings.PrefabAssetPath;
             prefabInstanceName = BrokkrSettings.PrefabInstanceName;
             prefabVariantPath = BrokkrSettings.PrefabVariantPath;
+            adHocSyncVarBindingId = BrokkrSettings.AdHocSyncVarBindingId;
+            adHocSyncVarKind = BrokkrSettings.AdHocSyncVarKind;
+            adHocSyncVarDisplayName = BrokkrSettings.AdHocSyncVarDisplayName;
+            adHocSyncVarUnityPath = BrokkrSettings.AdHocSyncVarUnityPath;
+            adHocSyncVarBlenderPath = BrokkrSettings.AdHocSyncVarBlenderPath;
+            adHocSyncVarAuthority = BrokkrSettings.AdHocSyncVarAuthority;
+            adHocSyncVarInterpolation = BrokkrSettings.AdHocSyncVarInterpolation;
+            adHocSyncVarEnabled = BrokkrSettings.AdHocSyncVarEnabled;
             Selection.selectionChanged += Repaint;
             EditorSceneManagerBridge.SceneDirtied += OnEditorSignal;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
@@ -130,6 +146,14 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.PrefabAssetPath = prefabAssetPath;
                 BrokkrSettings.PrefabInstanceName = prefabInstanceName;
                 BrokkrSettings.PrefabVariantPath = prefabVariantPath;
+                BrokkrSettings.AdHocSyncVarBindingId = adHocSyncVarBindingId;
+                BrokkrSettings.AdHocSyncVarKind = adHocSyncVarKind;
+                BrokkrSettings.AdHocSyncVarDisplayName = adHocSyncVarDisplayName;
+                BrokkrSettings.AdHocSyncVarUnityPath = adHocSyncVarUnityPath;
+                BrokkrSettings.AdHocSyncVarBlenderPath = adHocSyncVarBlenderPath;
+                BrokkrSettings.AdHocSyncVarAuthority = adHocSyncVarAuthority;
+                BrokkrSettings.AdHocSyncVarInterpolation = adHocSyncVarInterpolation;
+                BrokkrSettings.AdHocSyncVarEnabled = adHocSyncVarEnabled;
                 SetStatus("Settings saved.", MessageType.Info);
             }
 
@@ -290,6 +314,22 @@ namespace GameCult.Brokkr.Editor
                     unityTimelineObjectId = selectedId;
                     unityCinemachineObjectId = selectedId;
                 }
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Ad Hoc Sync Var", EditorStyles.boldLabel);
+            adHocSyncVarBindingId = EditorGUILayout.TextField("Binding Id", adHocSyncVarBindingId);
+            adHocSyncVarKind = EditorGUILayout.TextField("Kind", adHocSyncVarKind);
+            adHocSyncVarDisplayName = EditorGUILayout.TextField("Display Name", adHocSyncVarDisplayName);
+            adHocSyncVarUnityPath = EditorGUILayout.TextField("Unity Path", adHocSyncVarUnityPath);
+            adHocSyncVarBlenderPath = EditorGUILayout.TextField("Blender Path", adHocSyncVarBlenderPath);
+            adHocSyncVarAuthority = EditorGUILayout.TextField("Authority", adHocSyncVarAuthority);
+            adHocSyncVarInterpolation = EditorGUILayout.TextField("Interpolation", adHocSyncVarInterpolation);
+            adHocSyncVarEnabled = EditorGUILayout.Toggle("Enabled", adHocSyncVarEnabled);
+
+            if (GUILayout.Button("Publish Sync Var"))
+            {
+                PublishAdHocSyncVar();
             }
         }
 
@@ -580,6 +620,36 @@ namespace GameCult.Brokkr.Editor
             }
         }
 
+        private void PublishAdHocSyncVar()
+        {
+            try
+            {
+                RequireMirror();
+                var now = System.DateTimeOffset.UtcNow.ToString("O");
+                var bindingId = string.IsNullOrWhiteSpace(adHocSyncVarBindingId)
+                    ? StableId("adhoc-binding", NormalizedSyncSessionId(), adHocSyncVarKind, adHocSyncVarUnityPath, adHocSyncVarBlenderPath)
+                    : adHocSyncVarBindingId.Trim();
+                var session = BuildSyncSession(now);
+
+                mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
+                PublishSyncVar(
+                    bindingId,
+                    string.IsNullOrWhiteSpace(adHocSyncVarKind) ? "custom-property" : adHocSyncVarKind.Trim(),
+                    string.IsNullOrWhiteSpace(adHocSyncVarDisplayName) ? "Custom Property" : adHocSyncVarDisplayName.Trim(),
+                    adHocSyncVarUnityPath.Trim(),
+                    adHocSyncVarBlenderPath.Trim(),
+                    adHocSyncVarEnabled,
+                    string.IsNullOrWhiteSpace(adHocSyncVarInterpolation) ? "step" : adHocSyncVarInterpolation.Trim(),
+                    now,
+                    string.IsNullOrWhiteSpace(adHocSyncVarAuthority) ? "blender-to-unity" : adHocSyncVarAuthority.Trim());
+                SetStatus($"Published Brokkr sync var: {adHocSyncVarDisplayName}", MessageType.Info);
+            }
+            catch (System.Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
         private BrokkrSyncSession BuildSyncSession(string observedAt)
         {
             return new BrokkrSyncSession
@@ -601,8 +671,12 @@ namespace GameCult.Brokkr.Editor
             string blenderPropertyPath,
             bool enabled,
             string interpolation,
-            string updatedAt)
+            string updatedAt,
+            string authority = "")
         {
+            var resolvedAuthority = string.IsNullOrWhiteSpace(authority)
+                ? DefaultAuthorityForKind(kind)
+                : authority;
             var syncVar = new BrokkrSyncVar
             {
                 syncVarId = StableId("var", NormalizedSyncSessionId(), bindingId, kind),
@@ -612,14 +686,19 @@ namespace GameCult.Brokkr.Editor
                 kind = kind,
                 unityPropertyPath = unityPropertyPath,
                 blenderPropertyPath = blenderPropertyPath,
-                authority = kind.StartsWith("timeline", StringComparison.Ordinal) || kind == "custom-property"
-                    ? "blender-to-unity"
-                    : "unity-to-blender",
+                authority = resolvedAuthority,
                 enabled = enabled,
                 interpolation = interpolation,
                 updatedAt = updatedAt
             };
             mirror.PublishSyncVarAsync(syncVar).GetAwaiter().GetResult();
+        }
+
+        private static string DefaultAuthorityForKind(string kind)
+        {
+            return kind.StartsWith("timeline", StringComparison.Ordinal) || kind == "custom-property"
+                ? "blender-to-unity"
+                : "unity-to-blender";
         }
 
         private static string BuildTransformPath(Transform transform)

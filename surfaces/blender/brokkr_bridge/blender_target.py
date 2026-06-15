@@ -232,6 +232,52 @@ class BrokkrBlenderTarget:
         self._put_sync_var(node, documents, normalized_session_id, binding_id, "cinemachine-virtual-camera", "Cinemachine Camera", "CinemachineVirtualCamera", "camera", "blender-to-unity", sync_camera, "linear", now)
         return binding
 
+    def publish_sync_var(
+        self,
+        cache_path: str,
+        cultlib_py_src: str,
+        session_id: str,
+        session_display_name: str,
+        sync_var_display_name: str,
+        binding_id: str,
+        kind: str,
+        unity_property_path: str,
+        blender_property_path: str,
+        authority: str,
+        enabled: bool,
+        interpolation: str,
+    ) -> dict[str, Any]:
+        now = _now()
+        node, documents = self._open_node(cache_path, cultlib_py_src)
+        normalized_session_id = session_id or "default"
+        normalized_kind = kind or "custom-property"
+        normalized_binding_id = binding_id or _stable_id(
+            "adhoc-binding",
+            normalized_session_id,
+            normalized_kind,
+            unity_property_path,
+            blender_property_path,
+        )
+        session = _sync_session(normalized_session_id, session_display_name, now)
+        sync_var_id = _stable_id("var", normalized_session_id, normalized_binding_id, normalized_kind)
+        sync_var = {
+            "schema": SYNC_VAR_SCHEMA,
+            "syncVarId": sync_var_id,
+            "sessionId": normalized_session_id,
+            "bindingId": normalized_binding_id,
+            "displayName": sync_var_display_name or normalized_kind,
+            "kind": normalized_kind,
+            "unityPropertyPath": unity_property_path,
+            "blenderPropertyPath": blender_property_path,
+            "authority": authority or "blender-to-unity",
+            "enabled": bool(enabled),
+            "interpolation": interpolation or "step",
+            "updatedAt": now,
+        }
+        node.database.put(documents["sync_session"], f"sync/sessions/{normalized_session_id}", session)
+        node.database.put(documents["sync_var"], f"sync/vars/{sync_var_id}", sync_var)
+        return sync_var
+
     def start_server(
         self,
         cache_path: str,

@@ -190,6 +190,54 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Synchronize Blender camera animation into Unity Cinemachine lanes",
     )
 
+    ad_hoc_sync_var_binding_id: bpy.props.StringProperty(
+        name="Sync Var Binding",
+        default="",
+        description="Optional binding id for an ad hoc Brokkr sync var",
+    )
+
+    ad_hoc_sync_var_kind: bpy.props.StringProperty(
+        name="Sync Var Kind",
+        default="custom-property",
+        description="Brokkr sync var kind",
+    )
+
+    ad_hoc_sync_var_display_name: bpy.props.StringProperty(
+        name="Sync Var Name",
+        default="Custom Property",
+        description="Human-readable sync var label",
+    )
+
+    ad_hoc_sync_var_unity_path: bpy.props.StringProperty(
+        name="Unity Path",
+        default="",
+        description="Unity property path for the ad hoc sync var",
+    )
+
+    ad_hoc_sync_var_blender_path: bpy.props.StringProperty(
+        name="Blender Path",
+        default="",
+        description="Blender property path for the ad hoc sync var",
+    )
+
+    ad_hoc_sync_var_authority: bpy.props.StringProperty(
+        name="Authority",
+        default="blender-to-unity",
+        description="Sync authority, for example blender-to-unity or unity-to-blender",
+    )
+
+    ad_hoc_sync_var_interpolation: bpy.props.StringProperty(
+        name="Interpolation",
+        default="step",
+        description="Sync interpolation mode",
+    )
+
+    ad_hoc_sync_var_enabled: bpy.props.BoolProperty(
+        name="Sync Var Enabled",
+        default=True,
+        description="Whether the ad hoc sync var is enabled",
+    )
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "broker_uri")
@@ -217,6 +265,14 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "blender_action_name")
         layout.prop(self, "sync_timeline_frame")
         layout.prop(self, "sync_cinemachine_camera")
+        layout.prop(self, "ad_hoc_sync_var_binding_id")
+        layout.prop(self, "ad_hoc_sync_var_kind")
+        layout.prop(self, "ad_hoc_sync_var_display_name")
+        layout.prop(self, "ad_hoc_sync_var_unity_path")
+        layout.prop(self, "ad_hoc_sync_var_blender_path")
+        layout.prop(self, "ad_hoc_sync_var_authority")
+        layout.prop(self, "ad_hoc_sync_var_interpolation")
+        layout.prop(self, "ad_hoc_sync_var_enabled")
 
 
 class BROKKR_PT_status(bpy.types.Panel):
@@ -250,6 +306,18 @@ class BROKKR_PT_status(bpy.types.Panel):
         sync_row.operator("brokkr.publish_object_sync", icon="LINKED")
         sync_row.operator("brokkr.publish_timeline_sync", icon="TIME")
         sync_row.operator("brokkr.refresh_sync_receipt", icon="FILE_REFRESH")
+
+        var_box = layout.box()
+        var_box.label(text="Ad Hoc Sync Var")
+        var_box.prop(prefs, "ad_hoc_sync_var_binding_id")
+        var_box.prop(prefs, "ad_hoc_sync_var_kind")
+        var_box.prop(prefs, "ad_hoc_sync_var_display_name")
+        var_box.prop(prefs, "ad_hoc_sync_var_unity_path")
+        var_box.prop(prefs, "ad_hoc_sync_var_blender_path")
+        var_box.prop(prefs, "ad_hoc_sync_var_authority")
+        var_box.prop(prefs, "ad_hoc_sync_var_interpolation")
+        var_box.prop(prefs, "ad_hoc_sync_var_enabled")
+        var_box.operator("brokkr.publish_sync_var", icon="DRIVER")
 
         if adapter.last_snapshot:
             layout.separator()
@@ -401,6 +469,31 @@ class BROKKR_OT_refresh_sync_receipt(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BROKKR_OT_publish_sync_var(bpy.types.Operator):
+    bl_idname = "brokkr.publish_sync_var"
+    bl_label = "Publish Sync Var"
+    bl_description = "Publish an ad hoc Brokkr sync var through the Blender mirror"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        sync_var = target().publish_sync_var(
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+            prefs.sync_session_id,
+            prefs.sync_display_name,
+            prefs.ad_hoc_sync_var_display_name,
+            prefs.ad_hoc_sync_var_binding_id,
+            prefs.ad_hoc_sync_var_kind,
+            prefs.ad_hoc_sync_var_unity_path,
+            prefs.ad_hoc_sync_var_blender_path,
+            prefs.ad_hoc_sync_var_authority,
+            prefs.ad_hoc_sync_var_enabled,
+            prefs.ad_hoc_sync_var_interpolation,
+        )
+        self.report({"INFO"}, f"Brokkr sync var: {sync_var['displayName']}")
+        return {"FINISHED"}
+
+
 def _auto_capture(scene, depsgraph):
     context = bpy.context
     prefs = context.preferences.addons.get(__name__)
@@ -424,6 +517,7 @@ classes = (
     BROKKR_OT_publish_object_sync,
     BROKKR_OT_publish_timeline_sync,
     BROKKR_OT_refresh_sync_receipt,
+    BROKKR_OT_publish_sync_var,
 )
 
 
