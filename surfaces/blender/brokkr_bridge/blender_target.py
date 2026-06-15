@@ -403,6 +403,8 @@ class BrokkrBlenderTarget:
                 return self._set_object_transform(context, command)
             if action == "setObjectVisibility":
                 return self._set_object_visibility(context, command)
+            if action == "setObjectParent":
+                return self._set_object_parent(context, command)
             if action == "setObjectCustomProperty":
                 return self._set_object_custom_property(context, command)
             if action == "selectObject":
@@ -461,6 +463,19 @@ class BrokkrBlenderTarget:
         obj.hide_viewport = not visible
         obj.hide_render = not visible
         return self._receipt(command, "accepted", "Blender object visibility updated.", obj.name)
+
+    def _set_object_parent(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        obj = self._resolve_object(command)
+        if obj is None:
+            return self._receipt(command, "failed", "Target Blender object was not found.", "")
+
+        parent_name = command.get("parentObjectName") or command.get("parentName") or ""
+        parent = self.bpy.data.objects.get(parent_name) if parent_name else None
+        if parent_name and parent is None:
+            return self._receipt(command, "failed", f"Parent Blender object was not found: {parent_name}", obj.name)
+
+        obj.parent = parent
+        return self._receipt(command, "accepted", "Blender object parent updated.", obj.name)
 
     def _set_object_custom_property(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         obj = self._resolve_object(command)
@@ -524,6 +539,7 @@ class BrokkrBlenderTarget:
             "scale": _to_list(obj.scale),
             "visible": bool(obj.visible_get()),
             "selected": bool(obj.select_get()),
+            "parentName": obj.parent.name if obj.parent else "",
             "collections": [collection.name for collection in obj.users_collection],
             "materials": [slot.material.name for slot in obj.material_slots if slot.material],
             "modifiers": [self._modifier_snapshot(modifier) for modifier in obj.modifiers],

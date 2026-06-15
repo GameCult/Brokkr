@@ -418,6 +418,8 @@ fn build_sync_organ() -> SyncOrgan {
         sync_var_kinds: vec![
             "transform",
             "active-state",
+            "parent",
+            "hierarchy-parent",
             "material",
             "component-property",
             "custom-property",
@@ -649,6 +651,7 @@ struct UnityObject {
     object_id: String,
     name: String,
     path: String,
+    parent_id: String,
     active_self: bool,
     local_position: Vec<f64>,
     local_euler_angles: Vec<f64>,
@@ -674,6 +677,7 @@ struct UnityProperty {
 struct BlenderObject {
     name: String,
     object_type: String,
+    parent_name: String,
     location: Vec<f64>,
     rotation_euler: Vec<f64>,
     scale: Vec<f64>,
@@ -809,6 +813,53 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                                     "blender/commands/{}",
                                     command["commandId"].as_str().unwrap_or("sync")
                                 ),
+                                &command,
+                            )?;
+                        }
+                        report.blender_commands_written += 1;
+                    }
+                }
+                ("unity-to-blender", "parent" | "hierarchy-parent") => {
+                    let Some(source) = find_unity_object(&unity_objects, binding) else {
+                        report.messages.push(format!(
+                            "missing Unity object for parent binding {}",
+                            binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let parent_name = if source.parent_id.is_empty() {
+                        String::new()
+                    } else {
+                        match unity_objects
+                            .iter()
+                            .find(|candidate| candidate.object_id == source.parent_id)
+                        {
+                            Some(parent) => parent.name.clone(),
+                            None => {
+                                report.messages.push(format!(
+                                    "parent sync requested for {} but Unity parent {} was not present",
+                                    source.name, source.parent_id
+                                ));
+                                continue;
+                            }
+                        }
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "unity-to-blender-parent",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = blender_parent_command(
+                            &command_id,
+                            &binding.blender_object_name,
+                            &parent_name,
+                        );
+                        if !args.dry_run {
+                            blender_store.put_json_document(
+                                "brokkr.blender.command_intent.v0",
+                                &format!("blender/commands/{command_id}"),
                                 &command,
                             )?;
                         }
@@ -958,6 +1009,51 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                             &command_id,
                             &binding.unity_object_id,
                             source.visible,
+                        );
+                        if !args.dry_run {
+                            unity_store.put_messagepack_document(
+                                "brokkr.unity.command_intent.v0",
+                                &format!("unity/commands/{command_id}"),
+                                &command,
+                            )?;
+                        }
+                        report.unity_commands_written += 1;
+                    }
+                }
+                ("blender-to-unity", "parent" | "hierarchy-parent") => {
+                    let Some(source) = blender_objects.get(&binding.blender_object_name) else {
+                        report.messages.push(format!(
+                            "missing Blender object {} for parent binding {}",
+                            binding.blender_object_name, binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let parent_object_id = if source.parent_name.is_empty() {
+                        String::new()
+                    } else {
+                        match find_binding_for_blender_object(&object_bindings, &source.parent_name)
+                        {
+                            Some(parent_binding) => parent_binding.unity_object_id.clone(),
+                            None => {
+                                report.messages.push(format!(
+                                    "parent sync requested for {} but Blender parent {} has no object binding",
+                                    binding.blender_object_name, source.parent_name
+                                ));
+                                continue;
+                            }
+                        }
+                    };
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "blender-to-unity-parent",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = unity_parent_command(
+                            &command_id,
+                            &binding.unity_object_id,
+                            &parent_object_id,
                         );
                         if !args.dry_run {
                             unity_store.put_messagepack_document(
@@ -1336,6 +1432,7 @@ fn parse_unity_objects(documents: &[CacheDocument]) -> Vec<UnityObject> {
                 object_id: field_string(value, 0, "objectId")?,
                 name: field_string(value, 1, "name").unwrap_or_default(),
                 path: field_string(value, 2, "path").unwrap_or_default(),
+                parent_id: field_string(value, 8, "parentId").unwrap_or_default(),
                 active_self: field_bool(value, 4, "activeSelf").unwrap_or(true),
                 local_position: field_vec3(value, 10, "localPosition").unwrap_or_default(),
                 local_euler_angles: field_vec3(value, 11, "localEulerAngles").unwrap_or_default(),
@@ -1413,6 +1510,7 @@ fn parse_blender_objects(documents: &[CacheDocument]) -> BTreeMap<String, Blende
                 BlenderObject {
                     name,
                     object_type: field_string(value, 1, "type").unwrap_or_default(),
+                    parent_name: field_string(value, 10, "parentName").unwrap_or_default(),
                     location: field_vec3(value, 4, "location").unwrap_or_default(),
                     rotation_euler: field_vec3(value, 5, "rotationEuler").unwrap_or_default(),
                     scale: field_vec3(value, 6, "scale").unwrap_or_else(|| vec![1.0, 1.0, 1.0]),
@@ -1487,6 +1585,15 @@ fn find_unity_object<'a>(
                 !binding.display_name.is_empty() && object.name == binding.display_name
             })
         })
+}
+
+fn find_binding_for_blender_object<'a>(
+    bindings: &'a [ObjectBinding],
+    blender_object_name: &str,
+) -> Option<&'a ObjectBinding> {
+    bindings
+        .iter()
+        .find(|binding| binding.enabled && binding.blender_object_name == blender_object_name)
 }
 
 fn find_unity_property<'a>(
@@ -1591,6 +1698,20 @@ fn blender_material_command(
     })
 }
 
+fn blender_parent_command(
+    command_id: &str,
+    target_object_name: &str,
+    parent_object_name: &str,
+) -> Value {
+    json!({
+        "schema": "brokkr.blender.command_intent.v0",
+        "commandId": command_id,
+        "action": "setObjectParent",
+        "targetObjectName": target_object_name,
+        "parentObjectName": parent_object_name,
+    })
+}
+
 fn unity_active_command(command_id: &str, target_object_id: &str, active: bool) -> Value {
     json!([
         "brokkr.unity.command_intent.v0",
@@ -1603,6 +1724,24 @@ fn unity_active_command(command_id: &str, target_object_id: &str, active: bool) 
         active.to_string(),
         "",
         "",
+        "",
+        "",
+        ""
+    ])
+}
+
+fn unity_parent_command(command_id: &str, target_object_id: &str, parent_object_id: &str) -> Value {
+    json!([
+        "brokkr.unity.command_intent.v0",
+        command_id,
+        "setGameObjectParent",
+        target_object_id,
+        "",
+        "",
+        "",
+        "",
+        "",
+        parent_object_id,
         "",
         "",
         ""
@@ -1823,6 +1962,12 @@ mod tests {
         )));
         assert!(sync_documents.contains(&("brokkr.sync.receipt.v0", "sync/receipts/{receiptId}")));
         assert!(mirror_documents.contains(&("brokkr.sync.var.v0", PROVIDER_ID)));
+        assert!(
+            provider
+                .sync_organ
+                .sync_var_kinds
+                .contains(&"hierarchy-parent")
+        );
         assert!(
             provider
                 .sync_organ
@@ -2204,6 +2349,71 @@ mod tests {
     }
 
     #[test]
+    fn sync_once_writes_unity_parent_to_blender_parent_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_parent_stores(&unity_path, &blender_path, "unity-to-blender")?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path,
+            blender_cache: blender_path.clone(),
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.blender_commands_written, 1, "{report:#?}");
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        let command = blender_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("blender/commands/"))
+            .expect("Brokkr should emit a Blender parent command");
+
+        assert_eq!(command.value["action"], "setObjectParent");
+        assert_eq!(command.value["targetObjectName"], "Cube");
+        assert_eq!(command.value["parentObjectName"], "Rig");
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_once_writes_blender_parent_to_unity_parent_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_parent_stores(&unity_path, &blender_path, "blender-to-unity")?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 1, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let command = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("unity/commands/"))
+            .expect("Brokkr should emit a Unity parent command");
+
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(2)),
+            Some(&json!("setGameObjectParent"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(3)),
+            Some(&json!("unity-cube"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(9)),
+            Some(&json!("unity-rig"))
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn sync_once_writes_blender_visibility_to_unity_active_command() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let unity_path = temp.path().join("unity.ccmp");
@@ -2366,6 +2576,113 @@ mod tests {
                     "name": "Scene",
                     "frameCurrent": 48
                 }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    fn seed_parent_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({
+                "sceneObjects": [
+                    {
+                        "objectId": "unity-rig",
+                        "name": "Rig",
+                        "path": "/Rig",
+                        "activeSelf": true,
+                        "localPosition": [0.0, 0.0, 0.0],
+                        "localEulerAngles": [0.0, 0.0, 0.0],
+                        "localScale": [1.0, 1.0, 1.0]
+                    },
+                    {
+                        "objectId": "unity-cube",
+                        "name": "Cube",
+                        "path": "/Rig/Cube",
+                        "activeSelf": true,
+                        "parentId": "unity-rig",
+                        "localPosition": [1.0, 2.0, 3.0],
+                        "localEulerAngles": [0.0, 0.0, 0.0],
+                        "localScale": [1.0, 1.0, 1.0]
+                    }
+                ]
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-rig",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-rig",
+                "sessionId": "session-main",
+                "displayName": "Rig",
+                "unityObjectId": "unity-rig",
+                "unityPath": "/Rig",
+                "blenderObjectName": "Rig",
+                "enabled": true,
+                "authority": authority
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityObjectId": "unity-cube",
+                "unityPath": "/Rig/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": authority
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.var.v0",
+            "sync/vars/var-cube-parent",
+            &json!({
+                "schema": "brokkr.sync.var.v0",
+                "syncVarId": "var-cube-parent",
+                "sessionId": "session-main",
+                "bindingId": "binding-cube",
+                "displayName": "Parent",
+                "kind": "parent",
+                "unityPropertyPath": "parentId",
+                "blenderPropertyPath": "parentName",
+                "authority": authority,
+                "enabled": true
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [
+                    {
+                        "name": "Rig",
+                        "type": "EMPTY",
+                        "location": [0.0, 0.0, 0.0],
+                        "rotationEuler": [0.0, 0.0, 0.0],
+                        "scale": [1.0, 1.0, 1.0],
+                        "visible": true
+                    },
+                    {
+                        "name": "Cube",
+                        "type": "MESH",
+                        "parentName": "Rig",
+                        "location": [1.0, 2.0, 3.0],
+                        "rotationEuler": [0.0, 0.0, 0.0],
+                        "scale": [1.0, 1.0, 1.0],
+                        "visible": true,
+                        "materials": []
+                    }
+                ]
             }),
         )?;
 

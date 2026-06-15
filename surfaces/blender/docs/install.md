@@ -60,6 +60,7 @@ Admitted command actions:
 - `deleteObject`
 - `setObjectTransform`
 - `setObjectVisibility`
+- `setObjectParent`
 - `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`

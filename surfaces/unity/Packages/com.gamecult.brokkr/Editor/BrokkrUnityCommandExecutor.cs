@@ -20,6 +20,7 @@ namespace GameCult.Brokkr.Editor
                     "attachComponent" => AttachComponent(command),
                     "setGameObjectTransform" => SetGameObjectTransform(command),
                     "setGameObjectActive" => SetGameObjectActive(command),
+                    "setGameObjectParent" => SetGameObjectParent(command),
                     "setComponentProperty" => SetComponentProperty(command),
                     "instantiatePrefab" => InstantiatePrefab(command),
                     "createPrefabVariant" => CreatePrefabVariant(command),
@@ -158,6 +159,21 @@ namespace GameCult.Brokkr.Editor
             gameObject.SetActive(active);
             EditorSceneManager.MarkSceneDirty(gameObject.scene);
             return Accepted(command, "GameObject active state updated.", command.targetObjectId);
+        }
+
+        private static BrokkrUnityCommandReceipt SetGameObjectParent(BrokkrUnityCommand command)
+        {
+            var gameObject = ResolveGameObject(command.targetObjectId);
+            if (gameObject == null)
+            {
+                return Failed(command, "Target GameObject was not found.");
+            }
+
+            var parent = ResolveGameObject(command.parentObjectId);
+            Undo.RecordObject(gameObject.transform, "Brokkr Set GameObject Parent");
+            gameObject.transform.SetParent(parent != null ? parent.transform : null);
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+            return Accepted(command, "GameObject parent updated.", command.targetObjectId);
         }
 
         private static BrokkrUnityCommandReceipt InstantiatePrefab(BrokkrUnityCommand command)

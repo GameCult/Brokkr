@@ -59,9 +59,9 @@ Primary sync documents:
 - `brokkr.sync.session.v0`: shared sync session and mode.
 - `brokkr.sync.object_binding.v0`: Unity GameObject to Blender object/collection
   correspondence.
-- `brokkr.sync.var.v0`: per-lane sync options such as transform, material,
-  component property, custom property, timeline frame, camera lens, or
-  Cinemachine virtual camera.
+- `brokkr.sync.var.v0`: per-lane sync options such as transform, parent,
+  material, component property, custom property, timeline frame, camera lens,
+  or Cinemachine virtual camera.
   Editor surfaces may also publish ad hoc sync vars with an explicit kind,
   paths, authority, enabled flag, and interpolation. The daemon executes
   implemented kinds and preserves unsupported kinds as typed sync policy for
@@ -88,10 +88,14 @@ Implemented sync lanes:
 
 - Unity GameObject transform to Blender object transform.
 - Unity GameObject active state to Blender object visibility.
+- Unity GameObject parent id to Blender object parent through `setObjectParent`.
 - Unity Renderer material name to Blender object material assignment through
   `assignMaterial`.
 - Blender object visibility to Unity GameObject active state through
   `setGameObjectActive`.
+- Blender object parent name to Unity GameObject parent through
+  `setGameObjectParent`. The Blender parent must have an object binding so
+  Brokkr can resolve the Unity parent object id.
 - Unity serialized component property to Blender object custom property through
   `setObjectCustomProperty`. The syncvar kind may be `component-property` or
   `custom-property`; authority and paths determine direction. It uses
@@ -120,6 +124,7 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 - `attachComponent`
 - `setGameObjectTransform`
 - `setGameObjectActive`
+- `setGameObjectParent`
 - `setComponentProperty`
 - `instantiatePrefab`
 - `createPrefabVariant`
@@ -132,6 +137,8 @@ receipts. `setComponentProperty` writes the target object by default; when
 `componentType` is present, Unity resolves that component on the target
 GameObject and writes the serialized property there.
 `setGameObjectActive` uses `targetObjectId` and boolean `value`.
+`setGameObjectParent` uses `targetObjectId` and `parentObjectId`; an empty
+`parentObjectId` reparents the GameObject to the scene root.
 `instantiatePrefab` uses `assetPath` as the source prefab, `name` as the
 optional instance name, and `parentObjectId` as the optional parent.
 `createPrefabVariant` uses `assetPath` as the source prefab and `value` as the
@@ -148,6 +155,7 @@ All Blender writes use `brokkr.blender.command_intent.v0` and receive
 - `deleteObject`
 - `setObjectTransform`
 - `setObjectVisibility`
+- `setObjectParent`
 - `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`
@@ -155,6 +163,8 @@ All Blender writes use `brokkr.blender.command_intent.v0` and receive
 Blender owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Blender executes recognized intents and publishes
 receipts.
+`setObjectParent` uses `targetObjectName` and optional `parentObjectName`; an
+empty parent reparents the object to the Blender scene root.
 
 ## Eve/CultUI Lowerings
 
