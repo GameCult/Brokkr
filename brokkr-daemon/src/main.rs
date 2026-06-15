@@ -735,6 +735,8 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
     let mut emitted_command_ids = BTreeSet::new();
 
     for binding in object_bindings.iter().filter(|binding| binding.enabled) {
+        let unity_object = find_unity_object(&unity_objects, binding);
+        let blender_object = blender_objects.get(&binding.blender_object_name);
         let binding_vars: Vec<_> = sync_vars
             .iter()
             .filter(|sync_var| {
@@ -743,6 +745,88 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                     && sync_var.enabled
             })
             .collect();
+        let wants_unity_to_blender = binding.authority == "unity-to-blender"
+            || binding_vars.iter().any(|sync_var| {
+                sync_var.authority == "unity-to-blender"
+                    || (sync_var.authority.is_empty() && binding.authority == "unity-to-blender")
+            });
+        let wants_blender_to_unity = binding.authority == "blender-to-unity"
+            || binding_vars.iter().any(|sync_var| {
+                sync_var.authority == "blender-to-unity"
+                    || (sync_var.authority.is_empty() && binding.authority == "blender-to-unity")
+            });
+
+        match (wants_unity_to_blender, wants_blender_to_unity) {
+            (true, _) if unity_object.is_some() && blender_object.is_none() => {
+                let source = unity_object.expect("checked is_some");
+                let target_name = if binding.blender_object_name.is_empty() {
+                    source.name.as_str()
+                } else {
+                    binding.blender_object_name.as_str()
+                };
+                if target_name.is_empty() {
+                    report.messages.push(format!(
+                        "object binding {} cannot create a Blender object without a target name",
+                        binding.binding_id
+                    ));
+                    continue;
+                }
+
+                let command_id = stable_id([
+                    "sync",
+                    &binding.binding_id,
+                    "unity-to-blender-create-object",
+                ]);
+                if emitted_command_ids.insert(command_id.clone()) {
+                    let command = blender_create_object_command(
+                        &command_id,
+                        target_name,
+                        &source.local_position,
+                    );
+                    if !args.dry_run {
+                        blender_store.put_json_document(
+                            "brokkr.blender.command_intent.v0",
+                            &format!("blender/commands/{command_id}"),
+                            &command,
+                        )?;
+                    }
+                    report.blender_commands_written += 1;
+                }
+                continue;
+            }
+            (_, true) if blender_object.is_some() && unity_object.is_none() => {
+                let source = blender_object.expect("checked is_some");
+                let parent_object_id = if source.parent_name.is_empty() {
+                    String::new()
+                } else {
+                    find_binding_for_blender_object(&object_bindings, &source.parent_name)
+                        .map(|parent_binding| parent_binding.unity_object_id.clone())
+                        .unwrap_or_default()
+                };
+                let command_id = stable_id([
+                    "sync",
+                    &binding.binding_id,
+                    "blender-to-unity-create-object",
+                ]);
+                if emitted_command_ids.insert(command_id.clone()) {
+                    let command = unity_create_game_object_command(
+                        &command_id,
+                        &unity_object_name(binding, &source.name),
+                        &parent_object_id,
+                    );
+                    if !args.dry_run {
+                        unity_store.put_messagepack_document(
+                            "brokkr.unity.command_intent.v0",
+                            &format!("unity/commands/{command_id}"),
+                            &command,
+                        )?;
+                    }
+                    report.unity_commands_written += 1;
+                }
+                continue;
+            }
+            _ => {}
+        }
 
         for sync_var in binding_vars {
             let authority = if sync_var.authority.trim().is_empty() {
@@ -1642,6 +1726,24 @@ fn unity_transform_command(
     ])
 }
 
+fn unity_create_game_object_command(command_id: &str, name: &str, parent_object_id: &str) -> Value {
+    json!([
+        "brokkr.unity.command_intent.v0",
+        command_id,
+        "createGameObject",
+        "",
+        name,
+        "",
+        "",
+        "",
+        "",
+        parent_object_id,
+        "",
+        "",
+        ""
+    ])
+}
+
 fn unity_property_command(
     command_id: &str,
     target_object_id: &str,
@@ -1698,6 +1800,17 @@ fn blender_material_command(
     })
 }
 
+fn blender_create_object_command(command_id: &str, name: &str, location: &[f64]) -> Value {
+    json!({
+        "schema": "brokkr.blender.command_intent.v0",
+        "commandId": command_id,
+        "action": "createObject",
+        "objectType": "EMPTY",
+        "name": name,
+        "location": location,
+    })
+}
+
 fn blender_parent_command(
     command_id: &str,
     target_object_name: &str,
@@ -1710,6 +1823,19 @@ fn blender_parent_command(
         "targetObjectName": target_object_name,
         "parentObjectName": parent_object_name,
     })
+}
+
+fn unity_object_name(binding: &ObjectBinding, blender_name: &str) -> String {
+    if !binding.display_name.is_empty() {
+        return binding.display_name.clone();
+    }
+
+    binding
+        .unity_path
+        .rsplit('/')
+        .find(|part| !part.is_empty())
+        .unwrap_or(blender_name)
+        .to_string()
 }
 
 fn unity_active_command(command_id: &str, target_object_id: &str, active: bool) -> Value {
@@ -2377,6 +2503,68 @@ mod tests {
     }
 
     #[test]
+    fn sync_once_creates_missing_blender_object_from_unity_binding() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_missing_blender_object_stores(&unity_path, &blender_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path,
+            blender_cache: blender_path.clone(),
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.blender_commands_written, 1, "{report:#?}");
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        let command = blender_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("blender/commands/"))
+            .expect("Brokkr should emit a Blender create command");
+
+        assert_eq!(command.value["action"], "createObject");
+        assert_eq!(command.value["objectType"], "EMPTY");
+        assert_eq!(command.value["name"], "Cube");
+        assert_eq!(command.value["location"], json!([1.0, 2.0, 3.0]));
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_once_creates_missing_unity_object_from_blender_binding() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_missing_unity_object_stores(&unity_path, &blender_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 1, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let command = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("unity/commands/"))
+            .expect("Brokkr should emit a Unity create command");
+
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(2)),
+            Some(&json!("createGameObject"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(4)),
+            Some(&json!("Cube"))
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn sync_once_writes_blender_parent_to_unity_parent_command() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let unity_path = temp.path().join("unity.ccmp");
@@ -2582,6 +2770,90 @@ mod tests {
         Ok(())
     }
 
+    fn seed_missing_blender_object_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({
+                "sceneObjects": [{
+                    "objectId": "unity-cube",
+                    "name": "Cube",
+                    "path": "/Cube",
+                    "activeSelf": true,
+                    "localPosition": [1.0, 2.0, 3.0],
+                    "localEulerAngles": [0.0, 0.0, 0.0],
+                    "localScale": [1.0, 1.0, 1.0]
+                }]
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityObjectId": "unity-cube",
+                "unityPath": "/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": "unity-to-blender"
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({ "objects": [] }),
+        )?;
+
+        Ok(())
+    }
+
+    fn seed_missing_unity_object_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({ "sceneObjects": [] }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityPath": "/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": "blender-to-unity"
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [{
+                    "name": "Cube",
+                    "type": "EMPTY",
+                    "location": [1.0, 2.0, 3.0],
+                    "rotationEuler": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0],
+                    "visible": true
+                }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
     fn seed_parent_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
@@ -2764,6 +3036,21 @@ mod tests {
         let mut blender_store = MirrorStore::open(blender_path)?;
 
         unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({
+                "sceneObjects": [{
+                    "objectId": "unity-cube",
+                    "name": "Cube",
+                    "path": "/Cube",
+                    "activeSelf": true,
+                    "localPosition": [0.0, 0.0, 0.0],
+                    "localEulerAngles": [0.0, 0.0, 0.0],
+                    "localScale": [1.0, 1.0, 1.0]
+                }]
+            }),
+        )?;
+        unity_store.put_json_document(
             "brokkr.sync.object_binding.v0",
             "sync/bindings/objects/binding-cube",
             &json!({
@@ -2904,6 +3191,21 @@ mod tests {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
 
+        unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({
+                "sceneObjects": [{
+                    "objectId": "unity-cube",
+                    "name": "Cube",
+                    "path": "/Cube",
+                    "activeSelf": true,
+                    "localPosition": [0.0, 0.0, 0.0],
+                    "localEulerAngles": [0.0, 0.0, 0.0],
+                    "localScale": [1.0, 1.0, 1.0]
+                }]
+            }),
+        )?;
         unity_store.put_json_document(
             "brokkr.sync.object_binding.v0",
             "sync/bindings/objects/binding-cube",

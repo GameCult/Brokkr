@@ -86,6 +86,10 @@ status.
 
 Implemented sync lanes:
 
+- Missing counterpart materialization for enabled object bindings. When an
+  authority side has an object and the target side does not, Brokkr emits
+  `createObject` or `createGameObject` and waits for the next host snapshot
+  before applying per-lane mutations.
 - Unity GameObject transform to Blender object transform.
 - Unity GameObject active state to Blender object visibility.
 - Unity GameObject parent id to Blender object parent through `setObjectParent`.
