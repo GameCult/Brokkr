@@ -143,6 +143,7 @@ class BrokkrBlenderTarget:
         unity_object_id: str,
         unity_path: str,
         sync_transform: bool,
+        sync_parent: bool,
         sync_material: bool,
         sync_visibility: bool,
         sync_custom_properties: bool,
@@ -176,6 +177,7 @@ class BrokkrBlenderTarget:
         node.database.put(documents["sync_session"], f"sync/sessions/{normalized_session_id}", session)
         node.database.put(documents["sync_object_binding"], f"sync/bindings/objects/{binding_id}", binding)
         self._put_sync_var(node, documents, normalized_session_id, binding_id, "transform", "Transform", "Transform", "location,rotationEuler,scale", "blender-to-unity", sync_transform, "linear", now)
+        self._put_sync_var(node, documents, normalized_session_id, binding_id, "parent", "Parent", "parentId", "parentName", "blender-to-unity", sync_parent, "step", now)
         self._put_sync_var(node, documents, normalized_session_id, binding_id, "active-state", "Active State", "m_IsActive", "visible", "blender-to-unity", sync_visibility, "step", now)
         self._put_sync_var(node, documents, normalized_session_id, binding_id, "material", "Material", "Renderer.m_Materials", "materials", "blender-to-unity", sync_material, "step", now)
         unity_custom_path = _unity_custom_property_path(

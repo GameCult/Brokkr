@@ -45,7 +45,8 @@ owns the mirror state.
 9. Use the reported `cultnet://host:port` endpoint from a CultMesh/CultNet
    client to read snapshots or write command intents.
 10. Select a Blender object and click `Object Sync` to publish a
-    `brokkr.sync.object_binding.v0` plus per-lane `brokkr.sync.var.v0` records.
+    `brokkr.sync.object_binding.v0` plus per-lane `brokkr.sync.var.v0` records
+    for transform, parent, visibility, material, and custom property sync.
 11. Click `Timeline Sync` to publish a `brokkr.sync.timeline_binding.v0` for
     Blender frame/action data and Unity Timeline/Cinemachine lanes.
 12. After running `brokkr-daemon sync-once` or `sync-loop`, click

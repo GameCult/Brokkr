@@ -35,10 +35,13 @@ In Unity:
 8. To instantiate or variant a prefab through the mirror, fill `Prefab Asset
    Path`, optional `Instance Name`, and optional `Variant Path`, then click the
    matching prefab command.
-9. With the mirror running, run `brokkr-daemon sync-once` or `sync-loop`, then
+9. To publish object sync policy, select a GameObject, set the object lane
+   toggles including transform, parent, active state, material, and property
+   lanes, then click `Publish Object Sync`.
+10. With the mirror running, run `brokkr-daemon sync-once` or `sync-loop`, then
    click `Poll Sync Receipt` or leave the window open to show the latest daemon
    sync pass receipt.
-10. To publish an ad hoc sync variable, fill `Ad Hoc Sync Var` with a binding id
+11. To publish an ad hoc sync variable, fill `Ad Hoc Sync Var` with a binding id
     or leave it blank for a generated id, set kind/paths/authority/interpolation,
     then click `Publish Sync Var`.
 

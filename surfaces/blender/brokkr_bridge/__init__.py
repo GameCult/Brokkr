@@ -124,6 +124,12 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Synchronize object transforms",
     )
 
+    sync_parent: bpy.props.BoolProperty(
+        name="Sync Parent",
+        default=True,
+        description="Synchronize object parent relationships",
+    )
+
     sync_material: bpy.props.BoolProperty(
         name="Sync Material",
         default=True,
@@ -254,6 +260,7 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "unity_object_id")
         layout.prop(self, "unity_object_path")
         layout.prop(self, "sync_transform")
+        layout.prop(self, "sync_parent")
         layout.prop(self, "sync_material")
         layout.prop(self, "sync_visibility")
         layout.prop(self, "sync_custom_properties")
@@ -417,6 +424,7 @@ class BROKKR_OT_publish_object_sync(bpy.types.Operator):
             prefs.unity_object_id,
             prefs.unity_object_path,
             prefs.sync_transform,
+            prefs.sync_parent,
             prefs.sync_material,
             prefs.sync_visibility,
             prefs.sync_custom_properties,

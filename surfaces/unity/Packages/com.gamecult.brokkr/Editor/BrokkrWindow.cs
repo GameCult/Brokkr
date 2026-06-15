@@ -23,6 +23,7 @@ namespace GameCult.Brokkr.Editor
         private string blenderCollectionName = "";
         private bool syncObjectEnabled = true;
         private bool syncTransform = true;
+        private bool syncParent = true;
         private bool syncActiveState = true;
         private bool syncMaterial;
         private bool syncCustomProperty;
@@ -256,6 +257,7 @@ namespace GameCult.Brokkr.Editor
             blenderCollectionName = EditorGUILayout.TextField("Blender Collection", blenderCollectionName);
             syncObjectEnabled = EditorGUILayout.Toggle("Enable Object Binding", syncObjectEnabled);
             syncTransform = EditorGUILayout.Toggle("Sync Transform", syncTransform);
+            syncParent = EditorGUILayout.Toggle("Sync Parent", syncParent);
             syncActiveState = EditorGUILayout.Toggle("Sync Active State", syncActiveState);
             syncMaterial = EditorGUILayout.Toggle("Sync Material", syncMaterial);
             syncCustomProperty = EditorGUILayout.Toggle("Sync Custom Property", syncCustomProperty);
@@ -552,6 +554,7 @@ namespace GameCult.Brokkr.Editor
                 mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
                 mirror.PublishSyncObjectBindingAsync(binding).GetAwaiter().GetResult();
                 PublishSyncVar(bindingId, "transform", "Transform", "m_LocalPosition,m_LocalRotation,m_LocalScale", "location,rotationEuler,scale", syncTransform, "linear", now);
+                PublishSyncVar(bindingId, "parent", "Parent", "parentId", "parentName", syncParent, "step", now);
                 PublishSyncVar(bindingId, "active-state", "Active State", "m_IsActive", "visible", syncActiveState, "step", now);
                 PublishSyncVar(bindingId, "material", "Material", "Renderer.m_Materials", "materials", syncMaterial, "step", now);
                 if (syncCustomProperty)
