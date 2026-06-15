@@ -75,6 +75,11 @@ Operational commands:
 primitive as `sync-once`, writes command intents and sync receipts through the
 mirrors, and prints per-pass telemetry to stdout.
 
+Each daemon pass writes the same `brokkr.sync.receipt.v0` document into both
+editor mirror stores at `sync/receipts/{receiptId}`. Unity and Blender editor
+panels may display the latest receipt, but the daemon remains the owner of pass
+status.
+
 Implemented sync lanes:
 
 - Unity GameObject transform to Blender object transform.

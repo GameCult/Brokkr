@@ -249,6 +249,7 @@ class BROKKR_PT_status(bpy.types.Panel):
         sync_row = layout.row(align=True)
         sync_row.operator("brokkr.publish_object_sync", icon="LINKED")
         sync_row.operator("brokkr.publish_timeline_sync", icon="TIME")
+        sync_row.operator("brokkr.refresh_sync_receipt", icon="FILE_REFRESH")
 
         if adapter.last_snapshot:
             layout.separator()
@@ -260,6 +261,12 @@ class BROKKR_PT_status(bpy.types.Panel):
             layout.separator()
             layout.label(text=f"Last receipt: {adapter.last_receipt.get('status', '')}")
             layout.label(text=adapter.last_receipt.get("message", ""))
+
+        if adapter.last_sync_receipt:
+            layout.separator()
+            layout.label(text=f"Last sync pass: {adapter.last_sync_receipt.get('status', '')}")
+            layout.label(text=adapter.last_sync_receipt.get("observedAt", ""))
+            layout.label(text=adapter.last_sync_receipt.get("message", ""))
 
 
 class BROKKR_OT_capture_snapshot(bpy.types.Operator):
@@ -376,6 +383,24 @@ class BROKKR_OT_publish_timeline_sync(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BROKKR_OT_refresh_sync_receipt(bpy.types.Operator):
+    bl_idname = "brokkr.refresh_sync_receipt"
+    bl_label = "Refresh Sync Receipt"
+    bl_description = "Read the latest Brokkr daemon sync receipt from the Blender mirror"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        receipt = target().refresh_sync_receipt(
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+        )
+        if receipt is None:
+            self.report({"INFO"}, "No Brokkr sync receipt found.")
+        else:
+            self.report({"INFO"}, f"Brokkr sync pass: {receipt.get('status', '')} {receipt.get('message', '')}")
+        return {"FINISHED"}
+
+
 def _auto_capture(scene, depsgraph):
     context = bpy.context
     prefs = context.preferences.addons.get(__name__)
@@ -398,6 +423,7 @@ classes = (
     BROKKR_OT_stop_server,
     BROKKR_OT_publish_object_sync,
     BROKKR_OT_publish_timeline_sync,
+    BROKKR_OT_refresh_sync_receipt,
 )
 
 

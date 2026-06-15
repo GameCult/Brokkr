@@ -123,6 +123,8 @@ Shared Paths:
   use the same command-intent and receipt documents.
 - One-shot and continuous sync use the same `run_sync_once` decision primitive;
   the loop owns scheduling only.
+- Sync receipts are daemon-authored pass status documents written to both Unity
+  and Blender mirror stores so either editor can inspect the same result.
 - Host snapshots from all tools carry host id, tool kind, project path,
   observed-at timestamp, capabilities, and authority owner.
 

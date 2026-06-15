@@ -12,6 +12,7 @@ namespace GameCult.Brokkr.Editor
         private bool autoPublish;
         private bool autoPollCommands;
         private BrokkrHostSnapshot lastSnapshot;
+        private BrokkrSyncReceipt lastSyncReceipt;
         private string lastReceipt = "No snapshot published yet.";
         private MessageType lastMessageType = MessageType.Info;
         private double nextPollAt;
@@ -157,10 +158,21 @@ namespace GameCult.Brokkr.Editor
                 {
                     PollAndExecuteCommand(false);
                 }
+
+                if (GUILayout.Button("Poll Sync Receipt"))
+                {
+                    PollSyncReceipts(false);
+                }
             }
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(lastReceipt, lastMessageType);
+            if (lastSyncReceipt != null)
+            {
+                EditorGUILayout.LabelField("Last Sync Pass", $"{lastSyncReceipt.status} {lastSyncReceipt.observedAt}");
+                EditorGUILayout.LabelField("Sync Session", lastSyncReceipt.sessionId);
+                EditorGUILayout.HelpBox(lastSyncReceipt.message, MessageType.Info);
+            }
 
             if (lastSnapshot != null)
             {
@@ -344,6 +356,38 @@ namespace GameCult.Brokkr.Editor
             catch (Exception error)
             {
                 SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private void PollSyncReceipts(bool quiet)
+        {
+            try
+            {
+                RequireMirror();
+                var sawReceipt = false;
+                while (mirror.TryDequeueSyncReceipt(out var receipt) && receipt != null)
+                {
+                    lastSyncReceipt = receipt;
+                    sawReceipt = true;
+                }
+
+                if (sawReceipt)
+                {
+                    Repaint();
+                    return;
+                }
+
+                if (!quiet)
+                {
+                    SetStatus("No queued Brokkr sync receipt.", MessageType.Info);
+                }
+            }
+            catch (Exception error)
+            {
+                if (!quiet)
+                {
+                    SetStatus(error.Message, MessageType.Error);
+                }
             }
         }
 
@@ -648,6 +692,11 @@ namespace GameCult.Brokkr.Editor
 
         private void OnEditorUpdate()
         {
+            if (mirror != null && mirror.IsRunning)
+            {
+                PollSyncReceipts(true);
+            }
+
             if (!autoPollCommands || EditorApplication.timeSinceStartup < nextPollAt)
             {
                 return;

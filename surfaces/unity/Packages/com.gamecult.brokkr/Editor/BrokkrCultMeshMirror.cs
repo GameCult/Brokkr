@@ -14,8 +14,10 @@ namespace GameCult.Brokkr.Editor
     internal sealed class BrokkrCultMeshMirror : IDisposable
     {
         private readonly Queue<BrokkrUnityCommand> commandQueue = new();
+        private readonly Queue<BrokkrSyncReceipt> syncReceiptQueue = new();
         private CultMeshNode node;
         private IDisposable commandSubscription;
+        private IDisposable syncReceiptSubscription;
 
         internal bool IsRunning => node != null;
         internal string CachePath { get; private set; } = "";
@@ -46,6 +48,15 @@ namespace GameCult.Brokkr.Editor
                     if (change.Document != null)
                     {
                         commandQueue.Enqueue(change.Document);
+                    }
+                });
+            syncReceiptSubscription = node.Database
+                .Watch<BrokkrSyncReceipt>()
+                .Subscribe(change =>
+                {
+                    if (change.Document != null)
+                    {
+                        syncReceiptQueue.Enqueue(change.Document);
                     }
                 });
         }
@@ -125,6 +136,18 @@ namespace GameCult.Brokkr.Editor
             return false;
         }
 
+        internal bool TryDequeueSyncReceipt(out BrokkrSyncReceipt receipt)
+        {
+            if (syncReceiptQueue.Count > 0)
+            {
+                receipt = syncReceiptQueue.Dequeue();
+                return true;
+            }
+
+            receipt = null;
+            return false;
+        }
+
         internal static string DefaultCachePath()
         {
             var projectRoot = Application.dataPath.Replace("/Assets", "");
@@ -143,6 +166,8 @@ namespace GameCult.Brokkr.Editor
         {
             commandSubscription?.Dispose();
             commandSubscription = null;
+            syncReceiptSubscription?.Dispose();
+            syncReceiptSubscription = null;
             node?.Dispose();
             node = null;
         }

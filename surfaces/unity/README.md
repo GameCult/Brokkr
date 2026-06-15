@@ -35,11 +35,20 @@ In Unity:
 8. To instantiate or variant a prefab through the mirror, fill `Prefab Asset
    Path`, optional `Instance Name`, and optional `Variant Path`, then click the
    matching prefab command.
+9. With the mirror running, run `brokkr-daemon sync-once` or `sync-loop`, then
+   click `Poll Sync Receipt` or leave the window open to show the latest daemon
+   sync pass receipt.
 
 The Unity adapter writes the latest editor snapshot to:
 
 ```text
 unity/host/current
+```
+
+Brokkr daemon sync receipts are read from:
+
+```text
+sync/receipts/{receiptId}
 ```
 
 Verse-side command clients write `brokkr.unity.command_intent.v0` documents to:

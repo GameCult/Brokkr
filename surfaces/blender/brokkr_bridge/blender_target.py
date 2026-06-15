@@ -51,6 +51,7 @@ class BrokkrBlenderTarget:
         self.bpy = bpy_module
         self.last_snapshot: dict[str, Any] | None = None
         self.last_receipt: dict[str, Any] | None = None
+        self.last_sync_receipt: dict[str, Any] | None = None
         self._node_key: tuple[str, str, str] | None = None
         self._node: Any | None = None
         self._documents: dict[str, Any] | None = None
@@ -114,6 +115,23 @@ class BrokkrBlenderTarget:
         if debug_mirror_root:
             self._write_debug_document(debug_mirror_root, f"blender/receipts/{command_id}.json", receipt)
         self.last_receipt = receipt
+
+    def refresh_sync_receipt(
+        self,
+        cache_path: str,
+        cultlib_py_src: str,
+    ) -> dict[str, Any] | None:
+        node, _documents = self._open_node(cache_path, cultlib_py_src)
+        receipts = node.database.snapshot().get(SYNC_RECEIPT_SCHEMA, {})
+        if not receipts:
+            self.last_sync_receipt = None
+            return None
+
+        self.last_sync_receipt = max(
+            receipts.values(),
+            key=lambda receipt: receipt.get("observedAt", ""),
+        )
+        return self.last_sync_receipt
 
     def publish_object_sync(
         self,

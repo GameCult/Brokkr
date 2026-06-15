@@ -48,6 +48,9 @@ owns the mirror state.
     `brokkr.sync.object_binding.v0` plus per-lane `brokkr.sync.var.v0` records.
 11. Click `Timeline Sync` to publish a `brokkr.sync.timeline_binding.v0` for
     Blender frame/action data and Unity Timeline/Cinemachine lanes.
+12. After running `brokkr-daemon sync-once` or `sync-loop`, click
+    `Refresh Sync Receipt` to show the latest daemon sync pass observed in the
+    Blender mirror.
 
 Admitted command actions:
 

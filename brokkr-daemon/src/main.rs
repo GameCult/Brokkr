@@ -1163,16 +1163,14 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
         "observedAt": chrono_like_now(),
     });
     if !args.dry_run {
-        unity_store.put_json_document(
-            "brokkr.sync.receipt.v0",
-            &format!(
-                "sync/receipts/{}",
-                receipt["receiptId"].as_str().unwrap_or("sync-receipt")
-            ),
-            &receipt,
-        )?;
+        let receipt_key = format!(
+            "sync/receipts/{}",
+            receipt["receiptId"].as_str().unwrap_or("sync-receipt")
+        );
+        unity_store.put_json_document("brokkr.sync.receipt.v0", &receipt_key, &receipt)?;
+        blender_store.put_json_document("brokkr.sync.receipt.v0", &receipt_key, &receipt)?;
+        report.receipts_written += 2;
     }
-    report.receipts_written += 1;
 
     Ok(report)
 }
@@ -1857,6 +1855,40 @@ mod tests {
         assert_eq!(command.value["location"], json!([1.0, 2.0, 3.0]));
         assert_eq!(command.value["rotationEuler"], json!([4.0, 5.0, 6.0]));
         assert_eq!(command.value["scale"], json!([1.0, 1.0, 1.0]));
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_once_writes_receipt_to_both_editor_mirrors() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_sync_stores(&unity_path, &blender_path, "unity-to-blender")?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path.clone(),
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.receipts_written, 2, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        let unity_receipt = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("sync/receipts/"))
+            .expect("Unity mirror should receive the daemon sync receipt");
+        let blender_receipt = blender_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key == unity_receipt.key)
+            .expect("Blender mirror should receive the same daemon sync receipt key");
+
+        assert_eq!(unity_receipt.value["schema"], "brokkr.sync.receipt.v0");
+        assert_eq!(unity_receipt.value["status"], "ok");
+        assert_eq!(unity_receipt.value, blender_receipt.value);
 
         Ok(())
     }
