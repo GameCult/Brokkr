@@ -45,11 +45,14 @@ owns the mirror state.
 8. Click `Start Server`.
 9. Use the reported `cultnet://host:port` endpoint from a CultMesh/CultNet
    client to read snapshots or write command intents.
-10. Select a Blender object and click `Object Sync` to publish a
+10. In the `Object Sync` section, set the Unity object id/path and lane toggles,
+    select a Blender object, then click `Object Sync` to publish a
     `brokkr.sync.object_binding.v0` plus per-lane `brokkr.sync.var.v0` records
     for transform, parent, visibility, material, and custom property sync.
-11. Click `Timeline Sync` to publish a `brokkr.sync.timeline_binding.v0` for
-    Blender frame/action data and Unity Timeline/Cinemachine lanes.
+11. In the `Timeline / Cinemachine` section, set the Unity Timeline and
+    Cinemachine targets, then click `Timeline Sync` to publish a
+    `brokkr.sync.timeline_binding.v0` for Blender frame/action data and Unity
+    Timeline/Cinemachine lanes.
 12. After running `brokkr-daemon sync-once` or `sync-loop`, click
     `Refresh Sync Receipt` to show the latest daemon sync pass observed in the
     Blender mirror. Keep `Auto Drain Commands` enabled while `sync-loop` is
