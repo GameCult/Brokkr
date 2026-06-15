@@ -91,7 +91,9 @@ Implemented sync lanes:
 - Blender object visibility to Unity GameObject active state through
   `setGameObjectActive`.
 - Unity serialized component property to Blender object custom property through
-  `setObjectCustomProperty`. The syncvar uses `unityPropertyPath =
+  `setObjectCustomProperty`. The syncvar kind may be `component-property` or
+  `custom-property`; authority and paths determine direction. It uses
+  `unityPropertyPath =
   Component.Type::propertyPath` and `blenderPropertyPath = customProperties.name`.
 - Blender object transform to Unity GameObject transform.
 - Blender object material name to Unity Renderer material assignment through
@@ -101,7 +103,9 @@ Implemented sync lanes:
   GameObject/component. The FOV write uses `componentType =
   Cinemachine.CinemachineVirtualCamera` and property path `m_Lens.FieldOfView`.
 - Blender object custom property to Unity serialized property through
-  `setComponentProperty`. The syncvar uses `blenderPropertyPath =
+  `setComponentProperty`. The syncvar kind may be `custom-property` or
+  `component-property`; authority and paths determine direction. It uses
+  `blenderPropertyPath =
   customProperties.name` and `unityPropertyPath = Component.Type::propertyPath`
   when a Unity component should receive the value.
 

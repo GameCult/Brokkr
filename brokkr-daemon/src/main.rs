@@ -814,10 +814,10 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         report.blender_commands_written += 1;
                     }
                 }
-                ("unity-to-blender", "component-property") => {
+                ("unity-to-blender", "component-property" | "custom-property") => {
                     let Some(source) = find_unity_object(&unity_objects, binding) else {
                         report.messages.push(format!(
-                            "missing Unity object for component-property binding {}",
+                            "missing Unity object for property binding {}",
                             binding.binding_id
                         ));
                         continue;
@@ -826,7 +826,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         split_unity_property_target(&sync_var.unity_property_path);
                     if property_path.is_empty() {
                         report.messages.push(format!(
-                            "component-property sync var {} has no Unity property path",
+                            "property sync var {} has no Unity property path",
                             sync_var.sync_var_id
                         ));
                         continue;
@@ -834,7 +834,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                     let Some(property) = find_unity_property(source, component_type, property_path)
                     else {
                         report.messages.push(format!(
-                            "component-property sync requested for {} but Unity property {} was not present",
+                            "property sync requested for {} but Unity property {} was not present",
                             source.name, sync_var.unity_property_path
                         ));
                         continue;
@@ -845,7 +845,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         "sync",
                         &binding.binding_id,
                         &sync_var.sync_var_id,
-                        "unity-to-blender-component-property",
+                        "unity-to-blender-property",
                     ]);
                     if emitted_command_ids.insert(command_id.clone()) {
                         let command = json!({
@@ -965,10 +965,10 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         report.unity_commands_written += 1;
                     }
                 }
-                ("blender-to-unity", "custom-property") => {
+                ("blender-to-unity", "custom-property" | "component-property") => {
                     let Some(source) = blender_objects.get(&binding.blender_object_name) else {
                         report.messages.push(format!(
-                            "missing Blender object {} for custom-property binding {}",
+                            "missing Blender object {} for property binding {}",
                             binding.blender_object_name, binding.binding_id
                         ));
                         continue;
@@ -977,7 +977,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         normalize_blender_custom_property_path(&sync_var.blender_property_path);
                     let Some(value) = source.custom_properties.get(&blender_property_name) else {
                         report.messages.push(format!(
-                            "custom-property sync requested for {} but Blender property {} is not present",
+                            "property sync requested for {} but Blender property {} is not present",
                             binding.blender_object_name, blender_property_name
                         ));
                         continue;
@@ -986,7 +986,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         split_unity_property_target(&sync_var.unity_property_path);
                     if property_path.is_empty() {
                         report.messages.push(format!(
-                            "custom-property sync var {} has no Unity property path",
+                            "property sync var {} has no Unity property path",
                             sync_var.sync_var_id
                         ));
                         continue;
@@ -995,7 +995,7 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                         "sync",
                         &binding.binding_id,
                         &sync_var.sync_var_id,
-                        "blender-to-unity-custom-property",
+                        "blender-to-unity-property",
                     ]);
                     if emitted_command_ids.insert(command_id.clone()) {
                         let command = unity_property_command(
@@ -2005,7 +2005,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let unity_path = temp.path().join("unity.ccmp");
         let blender_path = temp.path().join("blender.ccmp");
-        seed_custom_property_stores(&unity_path, &blender_path)?;
+        seed_custom_property_stores(&unity_path, &blender_path, "custom-property")?;
 
         let report = run_sync_once(&SyncArgs {
             unity_cache: unity_path.clone(),
@@ -2036,6 +2036,39 @@ mod tests {
         assert_eq!(
             command.value.as_array().and_then(|items| items.get(6)),
             Some(&json!("intensity"))
+        );
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(7)),
+            Some(&json!("0.75"))
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_once_writes_blender_component_property_alias_to_unity_property_command() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_custom_property_stores(&unity_path, &blender_path, "component-property")?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path.clone(),
+            blender_cache: blender_path,
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.unity_commands_written, 1, "{report:#?}");
+        let mut unity_store = MirrorStore::open(&unity_path)?;
+        let command = unity_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("unity/commands/"))
+            .expect("Brokkr should emit a Unity property command for the alias kind");
+
+        assert_eq!(
+            command.value.as_array().and_then(|items| items.get(2)),
+            Some(&json!("setComponentProperty"))
         );
         assert_eq!(
             command.value.as_array().and_then(|items| items.get(7)),
@@ -2125,7 +2158,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let unity_path = temp.path().join("unity.ccmp");
         let blender_path = temp.path().join("blender.ccmp");
-        seed_component_property_stores(&unity_path, &blender_path)?;
+        seed_component_property_stores(&unity_path, &blender_path, "component-property")?;
 
         let report = run_sync_once(&SyncArgs {
             unity_cache: unity_path,
@@ -2143,6 +2176,35 @@ mod tests {
 
         assert_eq!(command.value["action"], "setObjectCustomProperty");
         assert_eq!(command.value["targetObjectName"], "Cube");
+        assert_eq!(command.value["propertyName"], "speed");
+        assert_eq!(command.value["value"], "12.5");
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_once_writes_unity_custom_property_alias_to_blender_custom_property_command()
+    -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_component_property_stores(&unity_path, &blender_path, "custom-property")?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path,
+            blender_cache: blender_path.clone(),
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.blender_commands_written, 1, "{report:#?}");
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        let command = blender_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("blender/commands/"))
+            .expect("Brokkr should emit a Blender custom property command for the alias kind");
+
+        assert_eq!(command.value["action"], "setObjectCustomProperty");
         assert_eq!(command.value["propertyName"], "speed");
         assert_eq!(command.value["value"], "12.5");
 
@@ -2330,7 +2392,11 @@ mod tests {
         Ok(())
     }
 
-    fn seed_component_property_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+    fn seed_component_property_stores(
+        unity_path: &Path,
+        blender_path: &Path,
+        kind: &str,
+    ) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
 
@@ -2383,7 +2449,7 @@ mod tests {
                 "sessionId": "session-main",
                 "bindingId": "binding-cube",
                 "displayName": "Speed",
-                "kind": "component-property",
+                "kind": kind,
                 "unityPropertyPath": "GameCult.Example.SpeedSource::speed",
                 "blenderPropertyPath": "customProperties.speed",
                 "authority": "unity-to-blender",
@@ -2409,7 +2475,11 @@ mod tests {
         Ok(())
     }
 
-    fn seed_custom_property_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+    fn seed_custom_property_stores(
+        unity_path: &Path,
+        blender_path: &Path,
+        kind: &str,
+    ) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
 
@@ -2437,7 +2507,7 @@ mod tests {
                 "sessionId": "session-main",
                 "bindingId": "binding-cube",
                 "displayName": "Intensity",
-                "kind": "custom-property",
+                "kind": kind,
                 "unityPropertyPath": "GameCult.Example.SyncTarget::intensity",
                 "blenderPropertyPath": "customProperties.intensity",
                 "authority": "blender-to-unity",
