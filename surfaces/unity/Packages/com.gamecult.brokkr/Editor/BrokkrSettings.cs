@@ -97,5 +97,23 @@ namespace GameCult.Brokkr.Editor
             get => EditorPrefs.GetString("GameCult.Brokkr.BlenderCustomPropertyPath", "");
             set => EditorPrefs.SetString("GameCult.Brokkr.BlenderCustomPropertyPath", value);
         }
+
+        internal static string ScriptableObjectType
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.ScriptableObjectType", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.ScriptableObjectType", value);
+        }
+
+        internal static string ScriptableObjectName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.ScriptableObjectName", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.ScriptableObjectName", value);
+        }
+
+        internal static string ScriptableObjectAssetPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.ScriptableObjectAssetPath", "Assets/BrokkrAsset.asset");
+            set => EditorPrefs.SetString("GameCult.Brokkr.ScriptableObjectAssetPath", value);
+        }
     }
 }

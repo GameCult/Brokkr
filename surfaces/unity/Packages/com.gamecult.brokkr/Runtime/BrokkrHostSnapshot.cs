@@ -86,6 +86,8 @@ namespace GameCult.Brokkr
         [Key(1)] public string guid = "";
         [Key(2)] public string typeName = "";
         [Key(3)] public bool isPrefab;
+        [Key(4)] public bool isScriptableObject;
+        [Key(5)] public string name = "";
     }
 
     [CultDocument("brokkr.unity.command_intent", "brokkr.unity.command_intent.v0")]

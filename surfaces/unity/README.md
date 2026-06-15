@@ -30,6 +30,8 @@ In Unity:
 4. Click `Start CultMesh Mirror`.
 5. Click `Capture Snapshot`.
 6. Click `Publish Mirror`.
+7. To create a ScriptableObject through the mirror, fill `ScriptableObject Type`,
+   `Asset Name`, and `Asset Path`, then click `Create ScriptableObject Asset`.
 
 The Unity adapter writes the latest editor snapshot to:
 
@@ -49,6 +51,12 @@ to:
 ```text
 unity/receipts/{commandId}
 ```
+
+Recognized Unity asset commands include:
+
+- `instantiatePrefab`
+- `createPrefabVariant`
+- `createScriptableObject`
 
 The Unity plugin is still an adapter. Unity owns Unity editor truth; Brokkr owns
 provider discovery; CultCache and CultMesh own the live mirror lane.

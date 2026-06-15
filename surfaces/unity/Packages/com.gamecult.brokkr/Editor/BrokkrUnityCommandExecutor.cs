@@ -23,6 +23,7 @@ namespace GameCult.Brokkr.Editor
                     "instantiatePrefab" => InstantiatePrefab(command),
                     "createPrefabVariant" => CreatePrefabVariant(command),
                     "assignMaterial" => AssignMaterial(command),
+                    "createScriptableObject" => CreateScriptableObject(command),
                     _ => Failed(command, $"Unsupported Unity command action: {command.action}")
                 };
             }
@@ -182,6 +183,27 @@ namespace GameCult.Brokkr.Editor
             return Accepted(command, $"Prefab variant saved: {variantPath}", variantPath);
         }
 
+        private static BrokkrUnityCommandReceipt CreateScriptableObject(BrokkrUnityCommand command)
+        {
+            var type = BrokkrUnitySnapshotBuilder.ResolveType(command.componentType);
+            if (type == null || !typeof(ScriptableObject).IsAssignableFrom(type))
+            {
+                return Failed(command, $"ScriptableObject type is not available: {command.componentType}");
+            }
+
+            var asset = ScriptableObject.CreateInstance(type);
+            asset.name = string.IsNullOrWhiteSpace(command.name) ? type.Name : command.name.Trim();
+            var assetPath = string.IsNullOrWhiteSpace(command.assetPath)
+                ? $"Assets/{asset.name}.asset"
+                : command.assetPath.Trim();
+            EnsureAssetFolder(assetPath);
+            assetPath = AssetDatabase.GenerateUniqueAssetPath(assetPath);
+            AssetDatabase.CreateAsset(asset, assetPath);
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            return Accepted(command, $"ScriptableObject created: {assetPath}", BrokkrUnitySnapshotBuilder.GetObjectId(asset));
+        }
+
         private static BrokkrUnityCommandReceipt AssignMaterial(BrokkrUnityCommand command)
         {
             var gameObject = ResolveGameObject(command.targetObjectId);
@@ -307,6 +329,28 @@ namespace GameCult.Brokkr.Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             return created;
+        }
+
+        private static void EnsureAssetFolder(string assetPath)
+        {
+            var folder = System.IO.Path.GetDirectoryName(assetPath)?.Replace("\\", "/");
+            if (string.IsNullOrWhiteSpace(folder) || folder == "Assets" || AssetDatabase.IsValidFolder(folder))
+            {
+                return;
+            }
+
+            var parts = folder.Split('/');
+            var current = parts[0];
+            for (var index = 1; index < parts.Length; index++)
+            {
+                var next = $"{current}/{parts[index]}";
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    AssetDatabase.CreateFolder(current, parts[index]);
+                }
+
+                current = next;
+            }
         }
 
         private static void AttachParent(GameObject gameObject, string parentObjectId)

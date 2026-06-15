@@ -160,7 +160,9 @@ namespace GameCult.Brokkr.Editor
                         path = path,
                         guid = AssetDatabase.AssetPathToGUID(path),
                         typeName = type?.FullName ?? "",
-                        isPrefab = path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase)
+                        isPrefab = path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase),
+                        isScriptableObject = type != null && typeof(ScriptableObject).IsAssignableFrom(type),
+                        name = System.IO.Path.GetFileNameWithoutExtension(path)
                     };
                 })
                 .ToArray();

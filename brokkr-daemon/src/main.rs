@@ -215,6 +215,7 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "component.state.read",
                     "selection.read",
                     "asset.catalog.read",
+                    "asset.scriptable_object.create",
                     "asset.prefab.instantiate",
                     "asset.prefab.variant.create",
                     "material.assign",
@@ -1495,6 +1496,11 @@ mod tests {
         assert!(unity.capabilities.contains(&"quest.input.consume"));
         assert!(unity.capabilities.contains(&"quest.pose.consume"));
         assert!(unity.capabilities.contains(&"quest.video_input.publish"));
+        assert!(
+            unity
+                .capabilities
+                .contains(&"asset.scriptable_object.create")
+        );
         assert!(unity.capabilities.contains(&"material.assign"));
         assert!(!blender.capabilities.contains(&"quest.input.consume"));
         assert!(blender.capabilities.contains(&"object.graph.read"));

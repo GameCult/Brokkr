@@ -20,6 +20,7 @@ Primary Eve surface id: `brokkr.eve.tool_broker.v0`
 - `component.state.read`
 - `selection.read`
 - `asset.catalog.read`
+- `asset.scriptable_object.create`
 - `asset.prefab.instantiate`
 - `asset.prefab.variant.create`
 - `gameobject.create`
@@ -102,12 +103,15 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 - `instantiatePrefab`
 - `createPrefabVariant`
 - `assignMaterial`
+- `createScriptableObject`
 
 Unity owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Unity executes recognized intents and publishes
 receipts. `setComponentProperty` writes the target object by default; when
 `componentType` is present, Unity resolves that component on the target
 GameObject and writes the serialized property there.
+`createScriptableObject` uses `componentType` as the ScriptableObject type and
+`assetPath` as the destination asset path.
 
 ## Blender Command Actions
 

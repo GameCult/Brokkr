@@ -67,6 +67,17 @@ namespace GameCult.Brokkr.Editor
             await node.FlushAsync(soft: true);
         }
 
+        internal async Task PublishCommandAsync(BrokkrUnityCommand command)
+        {
+            RequireRunning();
+            var commandId = string.IsNullOrWhiteSpace(command.commandId)
+                ? Guid.NewGuid().ToString("N")
+                : command.commandId;
+            command.commandId = commandId;
+            await node.Database.PutAsync(new CultRecordKey($"unity/commands/{commandId}"), command);
+            await node.FlushAsync(soft: true);
+        }
+
         internal async Task PublishQuestRouteAsync(BrokkrQuestRoute route)
         {
             RequireRunning();

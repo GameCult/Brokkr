@@ -35,6 +35,9 @@ namespace GameCult.Brokkr.Editor
         private string unityCustomPropertyComponentType = "";
         private string unityCustomPropertyPath = "";
         private string blenderCustomPropertyPath = "";
+        private string scriptableObjectType = "";
+        private string scriptableObjectName = "";
+        private string scriptableObjectAssetPath = "Assets/BrokkrAsset.asset";
 
         [MenuItem("GameCult/Brokkr")]
         public static void Open()
@@ -59,6 +62,9 @@ namespace GameCult.Brokkr.Editor
             unityCustomPropertyComponentType = BrokkrSettings.UnityCustomPropertyComponentType;
             unityCustomPropertyPath = BrokkrSettings.UnityCustomPropertyPath;
             blenderCustomPropertyPath = BrokkrSettings.BlenderCustomPropertyPath;
+            scriptableObjectType = BrokkrSettings.ScriptableObjectType;
+            scriptableObjectName = BrokkrSettings.ScriptableObjectName;
+            scriptableObjectAssetPath = BrokkrSettings.ScriptableObjectAssetPath;
             Selection.selectionChanged += Repaint;
             EditorSceneManagerBridge.SceneDirtied += OnEditorSignal;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
@@ -101,6 +107,9 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.UnityCustomPropertyComponentType = unityCustomPropertyComponentType;
                 BrokkrSettings.UnityCustomPropertyPath = unityCustomPropertyPath;
                 BrokkrSettings.BlenderCustomPropertyPath = blenderCustomPropertyPath;
+                BrokkrSettings.ScriptableObjectType = scriptableObjectType;
+                BrokkrSettings.ScriptableObjectName = scriptableObjectName;
+                BrokkrSettings.ScriptableObjectAssetPath = scriptableObjectAssetPath;
                 SetStatus("Settings saved.", MessageType.Info);
             }
 
@@ -146,7 +155,22 @@ namespace GameCult.Brokkr.Editor
                 EditorGUILayout.LabelField("Selection", string.Join(", ", lastSnapshot.selectedObjectNames));
             }
 
+            DrawAssetCommandSection();
             DrawSyncSection();
+        }
+
+        private void DrawAssetCommandSection()
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Unity Assets", EditorStyles.boldLabel);
+            scriptableObjectType = EditorGUILayout.TextField("ScriptableObject Type", scriptableObjectType);
+            scriptableObjectName = EditorGUILayout.TextField("Asset Name", scriptableObjectName);
+            scriptableObjectAssetPath = EditorGUILayout.TextField("Asset Path", scriptableObjectAssetPath);
+
+            if (GUILayout.Button("Create ScriptableObject Asset"))
+            {
+                PublishCreateScriptableObjectCommand();
+            }
         }
 
         private void DrawSyncSection()
@@ -272,6 +296,35 @@ namespace GameCult.Brokkr.Editor
                 lastSnapshot = BrokkrUnitySnapshotBuilder.Capture();
                 mirror.PublishSnapshotAsync(lastSnapshot).GetAwaiter().GetResult();
                 SetStatus($"Command {receipt.status}: {receipt.commandId} {receipt.message}", MessageType.Info);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private void PublishCreateScriptableObjectCommand()
+        {
+            try
+            {
+                RequireMirror();
+                if (string.IsNullOrWhiteSpace(scriptableObjectType))
+                {
+                    throw new InvalidOperationException("Enter a ScriptableObject type before creating an asset.");
+                }
+
+                var command = new BrokkrUnityCommand
+                {
+                    commandId = StableId("unity-command", "scriptable-object", Guid.NewGuid().ToString("N")),
+                    action = "createScriptableObject",
+                    componentType = scriptableObjectType.Trim(),
+                    name = scriptableObjectName.Trim(),
+                    assetPath = string.IsNullOrWhiteSpace(scriptableObjectAssetPath)
+                        ? "Assets/BrokkrAsset.asset"
+                        : scriptableObjectAssetPath.Trim()
+                };
+                mirror.PublishCommandAsync(command).GetAwaiter().GetResult();
+                PollAndExecuteCommand(true);
             }
             catch (Exception error)
             {
