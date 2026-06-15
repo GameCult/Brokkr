@@ -25,6 +25,7 @@ namespace GameCult.Brokkr.Editor
         private bool syncActiveState = true;
         private bool syncMaterial;
         private bool syncCustomProperty;
+        private bool syncComponentProperty;
         private bool syncTimelineFrame = true;
         private bool syncCinemachineCamera = true;
         private float syncTimelineFrameRate = 24.0f;
@@ -35,6 +36,9 @@ namespace GameCult.Brokkr.Editor
         private string unityCustomPropertyComponentType = "";
         private string unityCustomPropertyPath = "";
         private string blenderCustomPropertyPath = "";
+        private string unityComponentPropertyComponentType = "";
+        private string unityComponentPropertyPath = "";
+        private string blenderComponentPropertyPath = "";
         private string scriptableObjectType = "";
         private string scriptableObjectName = "";
         private string scriptableObjectAssetPath = "Assets/BrokkrAsset.asset";
@@ -65,6 +69,9 @@ namespace GameCult.Brokkr.Editor
             unityCustomPropertyComponentType = BrokkrSettings.UnityCustomPropertyComponentType;
             unityCustomPropertyPath = BrokkrSettings.UnityCustomPropertyPath;
             blenderCustomPropertyPath = BrokkrSettings.BlenderCustomPropertyPath;
+            unityComponentPropertyComponentType = BrokkrSettings.UnityComponentPropertyComponentType;
+            unityComponentPropertyPath = BrokkrSettings.UnityComponentPropertyPath;
+            blenderComponentPropertyPath = BrokkrSettings.BlenderComponentPropertyPath;
             scriptableObjectType = BrokkrSettings.ScriptableObjectType;
             scriptableObjectName = BrokkrSettings.ScriptableObjectName;
             scriptableObjectAssetPath = BrokkrSettings.ScriptableObjectAssetPath;
@@ -113,6 +120,9 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.UnityCustomPropertyComponentType = unityCustomPropertyComponentType;
                 BrokkrSettings.UnityCustomPropertyPath = unityCustomPropertyPath;
                 BrokkrSettings.BlenderCustomPropertyPath = blenderCustomPropertyPath;
+                BrokkrSettings.UnityComponentPropertyComponentType = unityComponentPropertyComponentType;
+                BrokkrSettings.UnityComponentPropertyPath = unityComponentPropertyPath;
+                BrokkrSettings.BlenderComponentPropertyPath = blenderComponentPropertyPath;
                 BrokkrSettings.ScriptableObjectType = scriptableObjectType;
                 BrokkrSettings.ScriptableObjectName = scriptableObjectName;
                 BrokkrSettings.ScriptableObjectAssetPath = scriptableObjectAssetPath;
@@ -218,6 +228,13 @@ namespace GameCult.Brokkr.Editor
                 unityCustomPropertyComponentType = EditorGUILayout.TextField("Unity Component Type", unityCustomPropertyComponentType);
                 unityCustomPropertyPath = EditorGUILayout.TextField("Unity Property Path", unityCustomPropertyPath);
                 blenderCustomPropertyPath = EditorGUILayout.TextField("Blender Custom Property", blenderCustomPropertyPath);
+            }
+            syncComponentProperty = EditorGUILayout.Toggle("Sync Component Property", syncComponentProperty);
+            using (new EditorGUI.DisabledScope(!syncComponentProperty))
+            {
+                unityComponentPropertyComponentType = EditorGUILayout.TextField("Source Component Type", unityComponentPropertyComponentType);
+                unityComponentPropertyPath = EditorGUILayout.TextField("Source Property Path", unityComponentPropertyPath);
+                blenderComponentPropertyPath = EditorGUILayout.TextField("Blender Custom Property", blenderComponentPropertyPath);
             }
 
             using (new EditorGUILayout.HorizontalScope())
@@ -461,6 +478,14 @@ namespace GameCult.Brokkr.Editor
                         : NormalizeBlenderCustomPropertyPath(blenderCustomPropertyPath);
                     PublishSyncVar(bindingId, "custom-property", "Custom Property", unityPath, blenderPath, true, "step", now);
                 }
+                if (syncComponentProperty)
+                {
+                    var unityPath = BuildUnityComponentPropertyPath();
+                    var blenderPath = string.IsNullOrWhiteSpace(blenderComponentPropertyPath)
+                        ? "customProperties.value"
+                        : NormalizeBlenderCustomPropertyPath(blenderComponentPropertyPath);
+                    PublishSyncVar(bindingId, "component-property", "Component Property", unityPath, blenderPath, true, "step", now);
+                }
                 SetStatus($"Published Brokkr object sync binding: {binding.displayName}", MessageType.Info);
             }
             catch (Exception error)
@@ -573,6 +598,16 @@ namespace GameCult.Brokkr.Editor
             return string.IsNullOrWhiteSpace(unityCustomPropertyComponentType)
                 ? propertyPath
                 : $"{unityCustomPropertyComponentType.Trim()}::{propertyPath}";
+        }
+
+        private string BuildUnityComponentPropertyPath()
+        {
+            var propertyPath = string.IsNullOrWhiteSpace(unityComponentPropertyPath)
+                ? "m_Enabled"
+                : unityComponentPropertyPath.Trim();
+            return string.IsNullOrWhiteSpace(unityComponentPropertyComponentType)
+                ? propertyPath
+                : $"{unityComponentPropertyComponentType.Trim()}::{propertyPath}";
         }
 
         private static string NormalizeBlenderCustomPropertyPath(string path)

@@ -79,6 +79,9 @@ Implemented sync lanes:
 
 - Unity GameObject transform to Blender object transform.
 - Unity GameObject active state to Blender object visibility.
+- Unity serialized component property to Blender object custom property through
+  `setObjectCustomProperty`. The syncvar uses `unityPropertyPath =
+  Component.Type::propertyPath` and `blenderPropertyPath = customProperties.name`.
 - Blender object transform to Unity GameObject transform.
 - Blender object material name to Unity Renderer material assignment through
   `assignMaterial`.
@@ -126,6 +129,7 @@ All Blender writes use `brokkr.blender.command_intent.v0` and receive
 - `deleteObject`
 - `setObjectTransform`
 - `setObjectVisibility`
+- `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`
 

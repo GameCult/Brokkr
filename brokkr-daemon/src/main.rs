@@ -653,6 +653,20 @@ struct UnityObject {
     local_position: Vec<f64>,
     local_euler_angles: Vec<f64>,
     local_scale: Vec<f64>,
+    components: Vec<UnityComponent>,
+}
+
+#[derive(Debug, Clone)]
+struct UnityComponent {
+    type_name: String,
+    assembly_qualified_name: String,
+    properties: Vec<UnityProperty>,
+}
+
+#[derive(Debug, Clone)]
+struct UnityProperty {
+    path: String,
+    value: String,
 }
 
 #[derive(Debug, Clone)]
@@ -786,6 +800,61 @@ fn run_sync_once(args: &SyncArgs) -> Result<SyncPassReport> {
                             "action": "setObjectVisibility",
                             "targetObjectName": binding.blender_object_name,
                             "visible": source.active_self,
+                        });
+                        if !args.dry_run {
+                            blender_store.put_json_document(
+                                "brokkr.blender.command_intent.v0",
+                                &format!(
+                                    "blender/commands/{}",
+                                    command["commandId"].as_str().unwrap_or("sync")
+                                ),
+                                &command,
+                            )?;
+                        }
+                        report.blender_commands_written += 1;
+                    }
+                }
+                ("unity-to-blender", "component-property") => {
+                    let Some(source) = find_unity_object(&unity_objects, binding) else {
+                        report.messages.push(format!(
+                            "missing Unity object for component-property binding {}",
+                            binding.binding_id
+                        ));
+                        continue;
+                    };
+                    let (component_type, property_path) =
+                        split_unity_property_target(&sync_var.unity_property_path);
+                    if property_path.is_empty() {
+                        report.messages.push(format!(
+                            "component-property sync var {} has no Unity property path",
+                            sync_var.sync_var_id
+                        ));
+                        continue;
+                    }
+                    let Some(property) = find_unity_property(source, component_type, property_path)
+                    else {
+                        report.messages.push(format!(
+                            "component-property sync requested for {} but Unity property {} was not present",
+                            source.name, sync_var.unity_property_path
+                        ));
+                        continue;
+                    };
+                    let blender_property_name =
+                        normalize_blender_custom_property_path(&sync_var.blender_property_path);
+                    let command_id = stable_id([
+                        "sync",
+                        &binding.binding_id,
+                        &sync_var.sync_var_id,
+                        "unity-to-blender-component-property",
+                    ]);
+                    if emitted_command_ids.insert(command_id.clone()) {
+                        let command = json!({
+                            "schema": "brokkr.blender.command_intent.v0",
+                            "commandId": command_id,
+                            "action": "setObjectCustomProperty",
+                            "targetObjectName": binding.blender_object_name,
+                            "propertyName": blender_property_name,
+                            "value": property.value,
                         });
                         if !args.dry_run {
                             blender_store.put_json_document(
@@ -1206,9 +1275,48 @@ fn parse_unity_objects(documents: &[CacheDocument]) -> Vec<UnityObject> {
                 local_euler_angles: field_vec3(value, 11, "localEulerAngles").unwrap_or_default(),
                 local_scale: field_vec3(value, 12, "localScale")
                     .unwrap_or_else(|| vec![1.0, 1.0, 1.0]),
+                components: parse_unity_components(value),
             })
         })
         .collect()
+}
+
+fn parse_unity_components(value: &Value) -> Vec<UnityComponent> {
+    field_array(value, 9, "components")
+        .map(|components| {
+            components
+                .iter()
+                .filter_map(|component| {
+                    Some(UnityComponent {
+                        type_name: field_string(component, 1, "typeName").unwrap_or_default(),
+                        assembly_qualified_name: field_string(
+                            component,
+                            2,
+                            "assemblyQualifiedName",
+                        )
+                        .unwrap_or_default(),
+                        properties: parse_unity_properties(component),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_unity_properties(value: &Value) -> Vec<UnityProperty> {
+    field_array(value, 4, "properties")
+        .map(|properties| {
+            properties
+                .iter()
+                .filter_map(|property| {
+                    Some(UnityProperty {
+                        path: field_string(property, 0, "path")?,
+                        value: field_string(property, 3, "value").unwrap_or_default(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn parse_blender_objects(documents: &[CacheDocument]) -> BTreeMap<String, BlenderObject> {
@@ -1305,6 +1413,28 @@ fn find_unity_object<'a>(
                 !binding.display_name.is_empty() && object.name == binding.display_name
             })
         })
+}
+
+fn find_unity_property<'a>(
+    object: &'a UnityObject,
+    component_type: &str,
+    property_path: &str,
+) -> Option<&'a UnityProperty> {
+    object
+        .components
+        .iter()
+        .filter(|component| {
+            component_type.is_empty()
+                || component.type_name == component_type
+                || component
+                    .type_name
+                    .rsplit('.')
+                    .next()
+                    .is_some_and(|name| name == component_type)
+                || component.assembly_qualified_name == component_type
+        })
+        .flat_map(|component| component.properties.iter())
+        .find(|property| property.path == property_path)
 }
 
 fn unity_transform_command(
@@ -1872,6 +2002,36 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn sync_once_writes_unity_component_property_to_blender_custom_property_command() -> Result<()>
+    {
+        let temp = tempfile::tempdir()?;
+        let unity_path = temp.path().join("unity.ccmp");
+        let blender_path = temp.path().join("blender.ccmp");
+        seed_component_property_stores(&unity_path, &blender_path)?;
+
+        let report = run_sync_once(&SyncArgs {
+            unity_cache: unity_path,
+            blender_cache: blender_path.clone(),
+            dry_run: false,
+        })?;
+
+        assert_eq!(report.blender_commands_written, 1, "{report:#?}");
+        let mut blender_store = MirrorStore::open(&blender_path)?;
+        let command = blender_store
+            .documents()?
+            .into_iter()
+            .find(|document| document.key.starts_with("blender/commands/"))
+            .expect("Brokkr should emit a Blender custom property command");
+
+        assert_eq!(command.value["action"], "setObjectCustomProperty");
+        assert_eq!(command.value["targetObjectName"], "Cube");
+        assert_eq!(command.value["propertyName"], "speed");
+        assert_eq!(command.value["value"], "12.5");
+
+        Ok(())
+    }
+
     fn seed_sync_stores(unity_path: &Path, blender_path: &Path, authority: &str) -> Result<()> {
         let mut unity_store = MirrorStore::open(unity_path)?;
         let mut blender_store = MirrorStore::open(blender_path)?;
@@ -1992,6 +2152,85 @@ mod tests {
                     "scale": [1.0, 1.0, 1.0],
                     "visible": true,
                     "materials": ["Obsidian"]
+                }]
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    fn seed_component_property_stores(unity_path: &Path, blender_path: &Path) -> Result<()> {
+        let mut unity_store = MirrorStore::open(unity_path)?;
+        let mut blender_store = MirrorStore::open(blender_path)?;
+
+        unity_store.put_json_document(
+            "brokkr.unity.host_snapshot.v0",
+            "unity/host/current",
+            &json!({
+                "sceneObjects": [{
+                    "objectId": "unity-cube",
+                    "name": "Cube",
+                    "path": "/Cube",
+                    "activeSelf": true,
+                    "components": [{
+                        "componentId": "component-speed",
+                        "typeName": "GameCult.Example.SpeedSource",
+                        "assemblyQualifiedName": "GameCult.Example.SpeedSource, Example",
+                        "enabled": true,
+                        "properties": [{
+                            "path": "speed",
+                            "displayName": "Speed",
+                            "propertyType": "Float",
+                            "value": "12.5",
+                            "editable": true
+                        }]
+                    }]
+                }]
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.object_binding.v0",
+            "sync/bindings/objects/binding-cube",
+            &json!({
+                "schema": "brokkr.sync.object_binding.v0",
+                "bindingId": "binding-cube",
+                "sessionId": "session-main",
+                "displayName": "Cube",
+                "unityObjectId": "unity-cube",
+                "unityPath": "/Cube",
+                "blenderObjectName": "Cube",
+                "enabled": true,
+                "authority": "unity-to-blender"
+            }),
+        )?;
+        unity_store.put_json_document(
+            "brokkr.sync.var.v0",
+            "sync/vars/var-cube-component-speed",
+            &json!({
+                "schema": "brokkr.sync.var.v0",
+                "syncVarId": "var-cube-component-speed",
+                "sessionId": "session-main",
+                "bindingId": "binding-cube",
+                "displayName": "Speed",
+                "kind": "component-property",
+                "unityPropertyPath": "GameCult.Example.SpeedSource::speed",
+                "blenderPropertyPath": "customProperties.speed",
+                "authority": "unity-to-blender",
+                "enabled": true
+            }),
+        )?;
+        blender_store.put_json_document(
+            "brokkr.blender.host_snapshot.v0",
+            "blender/host/current",
+            &json!({
+                "objects": [{
+                    "name": "Cube",
+                    "type": "MESH",
+                    "location": [0.0, 0.0, 0.0],
+                    "rotationEuler": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0],
+                    "visible": true,
+                    "materials": []
                 }]
             }),
         )?;

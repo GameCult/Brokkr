@@ -98,6 +98,24 @@ namespace GameCult.Brokkr.Editor
             set => EditorPrefs.SetString("GameCult.Brokkr.BlenderCustomPropertyPath", value);
         }
 
+        internal static string UnityComponentPropertyComponentType
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.UnityComponentPropertyComponentType", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.UnityComponentPropertyComponentType", value);
+        }
+
+        internal static string UnityComponentPropertyPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.UnityComponentPropertyPath", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.UnityComponentPropertyPath", value);
+        }
+
+        internal static string BlenderComponentPropertyPath
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.BlenderComponentPropertyPath", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.BlenderComponentPropertyPath", value);
+        }
+
         internal static string ScriptableObjectType
         {
             get => EditorPrefs.GetString("GameCult.Brokkr.ScriptableObjectType", "");

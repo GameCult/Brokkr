@@ -337,6 +337,8 @@ class BrokkrBlenderTarget:
                 return self._set_object_transform(context, command)
             if action == "setObjectVisibility":
                 return self._set_object_visibility(context, command)
+            if action == "setObjectCustomProperty":
+                return self._set_object_custom_property(context, command)
             if action == "selectObject":
                 return self._select_object(context, command)
             if action == "assignMaterial":
@@ -393,6 +395,17 @@ class BrokkrBlenderTarget:
         obj.hide_viewport = not visible
         obj.hide_render = not visible
         return self._receipt(command, "accepted", "Blender object visibility updated.", obj.name)
+
+    def _set_object_custom_property(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        obj = self._resolve_object(command)
+        if obj is None:
+            return self._receipt(command, "failed", "Target Blender object was not found.", "")
+
+        property_name = command.get("propertyName") or "brokkrValue"
+        if property_name.startswith("customProperties."):
+            property_name = property_name[len("customProperties."):]
+        obj[property_name] = command.get("value")
+        return self._receipt(command, "accepted", "Blender custom property updated.", obj.name)
 
     def _select_object(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         obj = self._resolve_object(command)

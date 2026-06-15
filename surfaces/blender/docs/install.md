@@ -55,5 +55,6 @@ Admitted command actions:
 - `deleteObject`
 - `setObjectTransform`
 - `setObjectVisibility`
+- `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`
