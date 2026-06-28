@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import sys
@@ -24,6 +25,8 @@ SYNC_OBJECT_BINDING_SCHEMA = "brokkr.sync.object_binding.v0"
 SYNC_VAR_SCHEMA = "brokkr.sync.var.v0"
 SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
 SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
+PREFAB_SNAPSHOT_SCHEMA = "brokkr.prefab.snapshot.v0"
+UNITY_PREFAB_MIRROR_SCHEMA = "brokkr.unity.prefab_mirror_snapshot.v0"
 
 CAPABILITIES = (
     "cultcache.mirror.publish",
@@ -52,6 +55,9 @@ class BrokkrBlenderTarget:
         self.last_snapshot: dict[str, Any] | None = None
         self.last_receipt: dict[str, Any] | None = None
         self.last_sync_receipt: dict[str, Any] | None = None
+        self.last_sync_policy: dict[str, Any] | None = None
+        self.last_prefab_snapshot: dict[str, Any] | None = None
+        self.last_unity_prefab_import: dict[str, Any] | None = None
         self.last_auto_drain_error: str = ""
         self._node_key: tuple[str, str, str] | None = None
         self._node: Any | None = None
@@ -78,6 +84,33 @@ class BrokkrBlenderTarget:
         if debug_mirror_root:
             self._write_debug_document(debug_mirror_root, "blender/host/current.json", snapshot)
         self.last_snapshot = snapshot
+        return snapshot
+
+    def publish_prefab_snapshot(
+        self,
+        context: Any,
+        cache_path: str,
+        cultlib_py_src: str,
+        debug_mirror_root: str,
+        prefab_id: str,
+        version: str,
+        collection_name: str,
+    ) -> dict[str, Any]:
+        collection = self._resolve_prefab_collection(context, collection_name)
+        snapshot = self.capture_prefab_snapshot(context, collection, prefab_id, version)
+        node, documents = self._open_node(cache_path, cultlib_py_src)
+        node.database.put(
+            documents["prefab_snapshot"],
+            f"prefabs/snapshots/{snapshot['snapshotId']}",
+            snapshot,
+        )
+        if debug_mirror_root:
+            self._write_debug_document(
+                debug_mirror_root,
+                f"prefabs/snapshots/{snapshot['snapshotId']}.json",
+                snapshot,
+            )
+        self.last_prefab_snapshot = snapshot
         return snapshot
 
     def drain_commands(
@@ -133,6 +166,100 @@ class BrokkrBlenderTarget:
             key=lambda receipt: receipt.get("observedAt", ""),
         )
         return self.last_sync_receipt
+
+    def refresh_sync_policy(
+        self,
+        cache_path: str,
+        cultlib_py_src: str,
+    ) -> dict[str, Any]:
+        node, _documents = self._open_node(cache_path, cultlib_py_src)
+        snapshot = node.database.snapshot()
+        object_bindings = sorted(
+            snapshot.get(SYNC_OBJECT_BINDING_SCHEMA, {}).values(),
+            key=lambda binding: binding.get("displayName", ""),
+        )
+        timeline_bindings = sorted(
+            snapshot.get(SYNC_TIMELINE_BINDING_SCHEMA, {}).values(),
+            key=lambda binding: binding.get("displayName", ""),
+        )
+        sync_vars = sorted(
+            snapshot.get(SYNC_VAR_SCHEMA, {}).values(),
+            key=lambda sync_var: (
+                sync_var.get("bindingId", ""),
+                sync_var.get("displayName", ""),
+            ),
+        )
+        self.last_sync_policy = {
+            "objectBindings": object_bindings,
+            "timelineBindings": timeline_bindings,
+            "syncVars": sync_vars,
+        }
+        return self.last_sync_policy
+
+    def import_latest_unity_prefab_mirror(
+        self,
+        context: Any,
+        cache_path: str,
+        cultlib_py_src: str,
+    ) -> dict[str, Any]:
+        node, _documents = self._open_node(cache_path, cultlib_py_src)
+        snapshots = node.database.snapshot().get(UNITY_PREFAB_MIRROR_SCHEMA, {})
+        if not snapshots:
+            raise RuntimeError("No Unity prefab mirror snapshots were found in the Brokkr mirror.")
+
+        snapshot = max(
+            snapshots.values(),
+            key=lambda item: item.get("observedAt", ""),
+        )
+        result = self.import_unity_prefab_mirror(context, snapshot)
+        self.last_unity_prefab_import = result
+        return result
+
+    def import_unity_prefab_mirror(self, context: Any, snapshot: dict[str, Any]) -> dict[str, Any]:
+        collection_name = snapshot.get("blenderCollectionName") or snapshot.get("prefabName") or "Unity Prefab Mirror"
+        collection = self.bpy.data.collections.get(collection_name)
+        if collection is None:
+            collection = self.bpy.data.collections.new(collection_name)
+            context.scene.collection.children.link(collection)
+
+        collection["brokkr.source"] = "unity-prefab-mirror"
+        collection["brokkr.prefabId"] = snapshot.get("prefabId", "")
+        collection["brokkr.prefabAssetPath"] = snapshot.get("prefabAssetPath", "")
+        collection["brokkr.contentHash"] = snapshot.get("contentHash", "")
+
+        material_names_by_asset: dict[str, str] = {}
+        for asset in snapshot.get("assets", []):
+            if asset.get("role") != "material":
+                continue
+            material = self.bpy.data.materials.get(asset.get("name", ""))
+            if material is None:
+                material = self.bpy.data.materials.new(asset.get("name", "") or asset.get("assetId", "Unity Material"))
+            material["brokkr.unityAssetId"] = asset.get("assetId", "")
+            material["brokkr.unityAssetPath"] = asset.get("unityAssetPath", "")
+            material_names_by_asset[asset.get("assetId", "")] = material.name
+
+        objects_by_node: dict[str, Any] = {}
+        for node in snapshot.get("nodes", []):
+            obj = self._create_or_update_prefab_node_object(collection, node, material_names_by_asset)
+            objects_by_node[node.get("nodeId", "")] = obj
+
+        for node in snapshot.get("nodes", []):
+            parent_id = node.get("parentNodeId", "")
+            obj = objects_by_node.get(node.get("nodeId", ""))
+            if obj is None:
+                continue
+            obj.parent = objects_by_node.get(parent_id) if parent_id else None
+
+        result = {
+            "schema": "brokkr.blender.prefab_import_receipt.v0",
+            "status": "accepted",
+            "snapshotId": snapshot.get("snapshotId", ""),
+            "prefabId": snapshot.get("prefabId", ""),
+            "collectionName": collection.name,
+            "objectCount": len(objects_by_node),
+            "observedAt": _now(),
+        }
+        return result
 
     def publish_object_sync(
         self,
@@ -395,6 +522,58 @@ class BrokkrBlenderTarget:
             "collections": [self._collection_snapshot(collection) for collection in bpy.data.collections],
         }
 
+    def capture_prefab_snapshot(
+        self,
+        context: Any,
+        collection: Any,
+        prefab_id: str,
+        version: str,
+    ) -> dict[str, Any]:
+        scene = context.scene
+        objects = list(self._collection_objects_recursive(collection))
+        object_names = {obj.name for obj in objects}
+        material_names = sorted({
+            slot.material.name
+            for obj in objects
+            for slot in getattr(obj, "material_slots", [])
+            if slot.material
+        })
+        materials = [
+            self._material_snapshot(self.bpy.data.materials[name])
+            for name in material_names
+            if name in self.bpy.data.materials
+        ]
+        child_collections = list(self._collections_recursive(collection))
+        normalized_prefab_id = prefab_id or f"brokkr/{collection.name}"
+        snapshot = {
+            "schema": PREFAB_SNAPSHOT_SCHEMA,
+            "snapshotId": "",
+            "prefabId": normalized_prefab_id,
+            "version": version or "authoring",
+            "providerId": PROVIDER_ID,
+            "toolKind": TOOL_KIND,
+            "sourceTool": "brokkr.blender",
+            "projectPath": self.bpy.data.filepath,
+            "sceneName": scene.name if scene else "",
+            "collectionName": collection.name,
+            "observedAt": _now(),
+            "objects": [self._object_snapshot(obj) for obj in objects],
+            "materials": materials,
+            "collections": [self._collection_snapshot(item) for item in child_collections],
+            "rootObjectNames": [
+                obj.name for obj in collection.objects
+                if obj.name in object_names and (obj.parent is None or obj.parent.name not in object_names)
+            ],
+            "metadata": {
+                "groundTruth": "blender-collection",
+                "deployTarget": "cultmesh-cdn",
+            },
+        }
+        content_hash = _stable_hash(snapshot)
+        snapshot["contentHash"] = content_hash
+        snapshot["snapshotId"] = _stable_id("prefab", normalized_prefab_id, version or "authoring", content_hash[:16])
+        return snapshot
+
     def execute_command(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         action = command.get("action", "")
         try:
@@ -626,6 +805,8 @@ class BrokkrBlenderTarget:
             "host_snapshot": cultcache.define_document_type(HOST_SNAPSHOT_SCHEMA),
             "command_intent": cultcache.define_document_type(COMMAND_INTENT_SCHEMA),
             "command_receipt": cultcache.define_document_type(COMMAND_RECEIPT_SCHEMA),
+            "prefab_snapshot": cultcache.define_document_type(PREFAB_SNAPSHOT_SCHEMA),
+            "unity_prefab_mirror": cultcache.define_document_type(UNITY_PREFAB_MIRROR_SCHEMA),
             "sync_session": cultcache.define_document_type(SYNC_SESSION_SCHEMA),
             "sync_object_binding": cultcache.define_document_type(SYNC_OBJECT_BINDING_SCHEMA),
             "sync_var": cultcache.define_document_type(SYNC_VAR_SCHEMA),
@@ -690,6 +871,77 @@ class BrokkrBlenderTarget:
             "updatedAt": updated_at,
         })
 
+    def _create_or_update_prefab_node_object(
+        self,
+        collection: Any,
+        node: dict[str, Any],
+        material_names_by_asset: dict[str, str],
+    ) -> Any:
+        name = node.get("name", "") or node.get("nodeId", "") or "Unity Prefab Node"
+        existing = self.bpy.data.objects.get(name)
+        mesh_asset_id = node.get("meshAssetId", "")
+        if existing is None:
+            if mesh_asset_id:
+                mesh = self.bpy.data.meshes.new(f"{name} Mesh Placeholder")
+                existing = self.bpy.data.objects.new(name, mesh)
+            else:
+                existing = self.bpy.data.objects.new(name, None)
+                existing.empty_display_type = "PLAIN_AXES"
+            collection.objects.link(existing)
+        elif existing.name not in collection.objects.keys():
+            try:
+                collection.objects.link(existing)
+            except RuntimeError:
+                pass
+
+        existing.location = _parse_vector_string(node.get("localPosition", ""), (0.0, 0.0, 0.0))
+        existing.rotation_euler = _parse_vector_string(node.get("localEulerAngles", ""), (0.0, 0.0, 0.0), degrees=True)
+        existing.scale = _parse_vector_string(node.get("localScale", ""), (1.0, 1.0, 1.0))
+        existing.hide_viewport = not bool(node.get("activeSelf", True))
+        existing.hide_render = not bool(node.get("activeSelf", True))
+        existing["brokkr.source"] = "unity-prefab-mirror"
+        existing["brokkr.nodeId"] = node.get("nodeId", "")
+        existing["brokkr.unityPath"] = node.get("path", "")
+        existing["brokkr.meshAssetId"] = mesh_asset_id
+        existing["brokkr.materialAssetIds"] = ",".join(node.get("materialAssetIds", []))
+        existing["brokkr.components"] = json.dumps(node.get("components", []), sort_keys=True)
+
+        if existing.data is not None and hasattr(existing.data, "materials"):
+            existing.data.materials.clear()
+            for asset_id in node.get("materialAssetIds", []):
+                material_name = material_names_by_asset.get(asset_id, "")
+                material = self.bpy.data.materials.get(material_name) if material_name else None
+                if material is not None:
+                    existing.data.materials.append(material)
+
+        return existing
+
+    def _resolve_prefab_collection(self, context: Any, collection_name: str) -> Any:
+        if collection_name:
+            collection = self.bpy.data.collections.get(collection_name)
+            if collection is None:
+                raise RuntimeError(f"Prefab collection was not found: {collection_name}")
+            return collection
+        if context.collection is not None:
+            return context.collection
+        if context.active_object is not None and context.active_object.users_collection:
+            return context.active_object.users_collection[0]
+        raise RuntimeError("Select an object or active collection before publishing a prefab snapshot.")
+
+    def _collections_recursive(self, collection: Any) -> Iterable[Any]:
+        yield collection
+        for child in collection.children:
+            yield from self._collections_recursive(child)
+
+    def _collection_objects_recursive(self, collection: Any) -> Iterable[Any]:
+        seen: set[str] = set()
+        for item in self._collections_recursive(collection):
+            for obj in item.objects:
+                if obj.name in seen:
+                    continue
+                seen.add(obj.name)
+                yield obj
+
 
 def _load_cultmesh(cultlib_py_src: str) -> tuple[Any, Any]:
     source = Path(cultlib_py_src or DEFAULT_CULTLIB_PY_SRC)
@@ -723,6 +975,20 @@ def _vector(value: Any, size: int, fallback: Any) -> tuple[float, ...]:
     while len(result) < size:
         result.append(0.0)
     return tuple(result)
+
+
+def _parse_vector_string(value: str, fallback: tuple[float, float, float], degrees: bool = False) -> tuple[float, float, float]:
+    if not value:
+        return fallback
+    try:
+        parts = [float(part.strip()) for part in str(value).split(",")[:3]]
+        while len(parts) < 3:
+            parts.append(0.0)
+        if degrees:
+            parts = [math.radians(part) for part in parts]
+        return (parts[0], parts[1], parts[2])
+    except ValueError:
+        return fallback
 
 
 def _jsonable(value: Any) -> Any:
@@ -769,6 +1035,11 @@ def _blender_custom_property_path(property_path: str) -> str:
 
 def _stable_id(*parts: str) -> str:
     return ":".join(str(part or "").replace(" ", "_").replace("/", "_").replace("\\", "_") for part in parts)
+
+
+def _stable_hash(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _active_action_name(context: Any) -> str:

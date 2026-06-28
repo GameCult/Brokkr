@@ -100,6 +100,24 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Maximum encoded snapshot response size",
     )
 
+    prefab_id: bpy.props.StringProperty(
+        name="Prefab Id",
+        default="",
+        description="Logical prefab id to publish; blank uses brokkr/{collection}",
+    )
+
+    prefab_version: bpy.props.StringProperty(
+        name="Prefab Version",
+        default="authoring",
+        description="Authoring version for the published prefab snapshot",
+    )
+
+    prefab_collection_name: bpy.props.StringProperty(
+        name="Prefab Collection",
+        default="",
+        description="Blender collection to publish; blank uses the active collection",
+    )
+
     sync_session_id: bpy.props.StringProperty(
         name="Sync Session",
         default="default",
@@ -262,6 +280,9 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "serve_port")
         layout.prop(self, "max_snapshot_documents")
         layout.prop(self, "max_snapshot_bytes")
+        layout.prop(self, "prefab_id")
+        layout.prop(self, "prefab_version")
+        layout.prop(self, "prefab_collection_name")
         layout.prop(self, "sync_session_id")
         layout.prop(self, "sync_display_name")
         layout.prop(self, "unity_object_id")
@@ -310,6 +331,7 @@ class BROKKR_PT_status(bpy.types.Panel):
 
         row = layout.row(align=True)
         row.operator("brokkr.capture_snapshot", icon="FILE_REFRESH")
+        row.operator("brokkr.publish_prefab_snapshot", icon="PACKAGE")
         row.operator("brokkr.drain_commands", icon="PLAY")
         layout.prop(prefs, "auto_drain_commands")
 
@@ -317,10 +339,19 @@ class BROKKR_PT_status(bpy.types.Panel):
         server_row.operator("brokkr.start_server", icon="NETWORK_DRIVE")
         server_row.operator("brokkr.stop_server", icon="CANCEL")
 
+        prefab_box = layout.box()
+        prefab_box.label(text="Prefab Deploy")
+        prefab_box.prop(prefs, "prefab_id")
+        prefab_box.prop(prefs, "prefab_version")
+        prefab_box.prop(prefs, "prefab_collection_name")
+        prefab_box.operator("brokkr.import_unity_prefab_mirror", icon="IMPORT")
+        prefab_box.operator("brokkr.publish_prefab_snapshot", icon="PACKAGE")
+
         sync_row = layout.row(align=True)
         sync_row.operator("brokkr.publish_object_sync", icon="LINKED")
         sync_row.operator("brokkr.publish_timeline_sync", icon="TIME")
         sync_row.operator("brokkr.refresh_sync_receipt", icon="FILE_REFRESH")
+        sync_row.operator("brokkr.refresh_sync_policy", icon="PRESET")
 
         object_box = layout.box()
         object_box.label(text="Object Sync")
@@ -366,6 +397,38 @@ class BROKKR_PT_status(bpy.types.Panel):
             layout.label(text=f"Objects: {adapter.last_snapshot.get('objectCount', 0)}")
             layout.label(text=f"Materials: {adapter.last_snapshot.get('materialCount', 0)}")
             layout.label(text=f"Selected: {len(adapter.last_snapshot.get('selectedObjectNames', []))}")
+
+        if adapter.last_prefab_snapshot:
+            layout.separator()
+            layout.label(text=f"Prefab: {adapter.last_prefab_snapshot.get('prefabId', '')}")
+            layout.label(text=f"Collection: {adapter.last_prefab_snapshot.get('collectionName', '')}")
+            layout.label(text=f"Prefab objects: {len(adapter.last_prefab_snapshot.get('objects', []))}")
+
+        if adapter.last_unity_prefab_import:
+            layout.separator()
+            layout.label(text=f"Imported Unity Prefab: {adapter.last_unity_prefab_import.get('prefabId', '')}")
+            layout.label(text=f"Import Collection: {adapter.last_unity_prefab_import.get('collectionName', '')}")
+            layout.label(text=f"Imported objects: {adapter.last_unity_prefab_import.get('objectCount', 0)}")
+
+        if adapter.last_sync_policy:
+            policy = adapter.last_sync_policy
+            layout.separator()
+            layout.label(text="Published Sync Policy")
+            layout.label(text=f"Object bindings: {len(policy.get('objectBindings', []))}")
+            for binding in policy.get("objectBindings", [])[:5]:
+                label = binding.get("displayName", binding.get("bindingId", ""))
+                state = "" if binding.get("enabled", False) else " (disabled)"
+                layout.label(text=f"{label}{state}: {binding.get('authority', '')}")
+            layout.label(text=f"Timeline bindings: {len(policy.get('timelineBindings', []))}")
+            for binding in policy.get("timelineBindings", [])[:5]:
+                label = binding.get("displayName", binding.get("bindingId", ""))
+                state = "" if binding.get("enabled", False) else " (disabled)"
+                layout.label(text=f"{label}{state}: {binding.get('blenderActionName', '')}")
+            layout.label(text=f"Sync vars: {len(policy.get('syncVars', []))}")
+            for sync_var in policy.get("syncVars", [])[:8]:
+                label = sync_var.get("displayName", sync_var.get("syncVarId", ""))
+                state = "" if sync_var.get("enabled", False) else " (disabled)"
+                layout.label(text=f"{label}{state}: {sync_var.get('kind', '')} {sync_var.get('authority', '')}")
 
         if adapter.last_receipt:
             layout.separator()
@@ -415,6 +478,48 @@ class BROKKR_OT_drain_commands(bpy.types.Operator):
             prefs.debug_mirror_root,
         )
         self.report({"INFO"}, f"Brokkr processed {len(receipts)} Blender command(s)")
+        return {"FINISHED"}
+
+
+class BROKKR_OT_publish_prefab_snapshot(bpy.types.Operator):
+    bl_idname = "brokkr.publish_prefab_snapshot"
+    bl_label = "Publish Prefab Snapshot"
+    bl_description = "Publish the active Blender collection as a deployable Brokkr prefab snapshot"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        snapshot = target().publish_prefab_snapshot(
+            context,
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+            prefs.debug_mirror_root,
+            prefs.prefab_id,
+            prefs.prefab_version,
+            prefs.prefab_collection_name,
+        )
+        self.report(
+            {"INFO"},
+            f"Brokkr prefab snapshot: {snapshot['prefabId']} ({len(snapshot.get('objects', []))} object(s))",
+        )
+        return {"FINISHED"}
+
+
+class BROKKR_OT_import_unity_prefab_mirror(bpy.types.Operator):
+    bl_idname = "brokkr.import_unity_prefab_mirror"
+    bl_label = "Import Unity Prefab Mirror"
+    bl_description = "Import the latest Unity prefab mirror snapshot into a Blender collection"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        result = target().import_latest_unity_prefab_mirror(
+            context,
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+        )
+        self.report(
+            {"INFO"},
+            f"Imported Unity prefab mirror: {result['collectionName']} ({result['objectCount']} object(s))",
+        )
         return {"FINISHED"}
 
 
@@ -517,6 +622,27 @@ class BROKKR_OT_refresh_sync_receipt(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class BROKKR_OT_refresh_sync_policy(bpy.types.Operator):
+    bl_idname = "brokkr.refresh_sync_policy"
+    bl_label = "Refresh Sync Policy"
+    bl_description = "Read published Brokkr sync bindings and sync vars from the Blender mirror"
+
+    def execute(self, context):
+        prefs = context.preferences.addons[__name__].preferences
+        policy = target().refresh_sync_policy(
+            prefs.cultmesh_cache_path,
+            prefs.cultlib_py_src,
+        )
+        self.report(
+            {"INFO"},
+            "Brokkr sync policy: "
+            f"{len(policy.get('objectBindings', []))} object binding(s), "
+            f"{len(policy.get('timelineBindings', []))} timeline binding(s), "
+            f"{len(policy.get('syncVars', []))} sync var(s)",
+        )
+        return {"FINISHED"}
+
+
 class BROKKR_OT_publish_sync_var(bpy.types.Operator):
     bl_idname = "brokkr.publish_sync_var"
     bl_label = "Publish Sync Var"
@@ -586,11 +712,14 @@ classes = (
     BROKKR_PT_status,
     BROKKR_OT_capture_snapshot,
     BROKKR_OT_drain_commands,
+    BROKKR_OT_publish_prefab_snapshot,
+    BROKKR_OT_import_unity_prefab_mirror,
     BROKKR_OT_start_server,
     BROKKR_OT_stop_server,
     BROKKR_OT_publish_object_sync,
     BROKKR_OT_publish_timeline_sync,
     BROKKR_OT_refresh_sync_receipt,
+    BROKKR_OT_refresh_sync_policy,
     BROKKR_OT_publish_sync_var,
 )
 

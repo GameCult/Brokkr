@@ -37,6 +37,56 @@ namespace GameCult.Brokkr
         [Key(4)] public string status = "";
     }
 
+    [CultDocument("brokkr.unity.prefab_mirror_snapshot", "brokkr.unity.prefab_mirror_snapshot.v0")]
+    [MessagePackObject]
+    [Serializable]
+    public sealed class BrokkrUnityPrefabMirrorSnapshot
+    {
+        [Key(0)] public string schema = "brokkr.unity.prefab_mirror_snapshot.v0";
+        [Key(1)] public string snapshotId = "";
+        [Key(2)] public string providerId = "brokkr.unity_editor";
+        [Key(3)] public string sourceTool = "unity-editor";
+        [Key(4)] public string prefabId = "";
+        [Key(5)] public string prefabAssetPath = "";
+        [Key(6)] public string prefabName = "";
+        [Key(7)] public string blenderCollectionName = "";
+        [Key(8)] public string observedAt = "";
+        [Key(9)] public string contentHash = "";
+        [Key(10)] public BrokkrUnityPrefabNodeSnapshot[] nodes = Array.Empty<BrokkrUnityPrefabNodeSnapshot>();
+        [Key(11)] public BrokkrUnityPrefabAssetRequirement[] assets = Array.Empty<BrokkrUnityPrefabAssetRequirement>();
+    }
+
+    [MessagePackObject]
+    [Serializable]
+    public sealed class BrokkrUnityPrefabNodeSnapshot
+    {
+        [Key(0)] public string nodeId = "";
+        [Key(1)] public string parentNodeId = "";
+        [Key(2)] public string name = "";
+        [Key(3)] public string path = "";
+        [Key(4)] public bool activeSelf;
+        [Key(5)] public string tag = "";
+        [Key(6)] public int layer;
+        [Key(7)] public string localPosition = "";
+        [Key(8)] public string localEulerAngles = "";
+        [Key(9)] public string localScale = "";
+        [Key(10)] public string meshAssetId = "";
+        [Key(11)] public string[] materialAssetIds = Array.Empty<string>();
+        [Key(12)] public BrokkrComponentSnapshot[] components = Array.Empty<BrokkrComponentSnapshot>();
+    }
+
+    [MessagePackObject]
+    [Serializable]
+    public sealed class BrokkrUnityPrefabAssetRequirement
+    {
+        [Key(0)] public string assetId = "";
+        [Key(1)] public string role = "";
+        [Key(2)] public string unityAssetPath = "";
+        [Key(3)] public string guid = "";
+        [Key(4)] public string name = "";
+        [Key(5)] public string typeName = "";
+    }
+
     [MessagePackObject]
     [Serializable]
     public sealed class BrokkrGameObjectSnapshot

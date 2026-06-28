@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using GameCult.Brokkr;
 using UnityEditor;
 using UnityEngine;
@@ -13,6 +14,7 @@ namespace GameCult.Brokkr.Editor
         private bool autoPollCommands;
         private BrokkrHostSnapshot lastSnapshot;
         private BrokkrSyncReceipt lastSyncReceipt;
+        private BrokkrSyncPolicyView lastSyncPolicy;
         private string lastReceipt = "No snapshot published yet.";
         private MessageType lastMessageType = MessageType.Info;
         private double nextPollAt;
@@ -47,6 +49,7 @@ namespace GameCult.Brokkr.Editor
         private string prefabAssetPath = "";
         private string prefabInstanceName = "";
         private string prefabVariantPath = "Assets/BrokkrPrefabVariant.prefab";
+        private string prefabMirrorCollectionName = "";
         private string adHocSyncVarBindingId = "";
         private string adHocSyncVarKind = "custom-property";
         private string adHocSyncVarDisplayName = "Custom Property";
@@ -88,6 +91,7 @@ namespace GameCult.Brokkr.Editor
             prefabAssetPath = BrokkrSettings.PrefabAssetPath;
             prefabInstanceName = BrokkrSettings.PrefabInstanceName;
             prefabVariantPath = BrokkrSettings.PrefabVariantPath;
+            prefabMirrorCollectionName = BrokkrSettings.PrefabMirrorCollectionName;
             adHocSyncVarBindingId = BrokkrSettings.AdHocSyncVarBindingId;
             adHocSyncVarKind = BrokkrSettings.AdHocSyncVarKind;
             adHocSyncVarDisplayName = BrokkrSettings.AdHocSyncVarDisplayName;
@@ -147,6 +151,7 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.PrefabAssetPath = prefabAssetPath;
                 BrokkrSettings.PrefabInstanceName = prefabInstanceName;
                 BrokkrSettings.PrefabVariantPath = prefabVariantPath;
+                BrokkrSettings.PrefabMirrorCollectionName = prefabMirrorCollectionName;
                 BrokkrSettings.AdHocSyncVarBindingId = adHocSyncVarBindingId;
                 BrokkrSettings.AdHocSyncVarKind = adHocSyncVarKind;
                 BrokkrSettings.AdHocSyncVarDisplayName = adHocSyncVarDisplayName;
@@ -188,6 +193,11 @@ namespace GameCult.Brokkr.Editor
                 {
                     PollSyncReceipts(false);
                 }
+
+                if (GUILayout.Button("Refresh Sync Policy"))
+                {
+                    RefreshSyncPolicy();
+                }
             }
 
             EditorGUILayout.Space();
@@ -211,8 +221,44 @@ namespace GameCult.Brokkr.Editor
                 EditorGUILayout.LabelField("Selection", string.Join(", ", lastSnapshot.selectedObjectNames));
             }
 
+            DrawSyncPolicySummary();
             DrawAssetCommandSection();
             DrawSyncSection();
+        }
+
+        private void DrawSyncPolicySummary()
+        {
+            if (lastSyncPolicy == null)
+            {
+                return;
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Published Sync Policy", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Object Bindings", lastSyncPolicy.objectBindings.Length.ToString());
+            foreach (var binding in lastSyncPolicy.objectBindings.Take(5))
+            {
+                EditorGUILayout.LabelField(
+                    binding.enabled ? binding.displayName : $"{binding.displayName} (disabled)",
+                    $"{binding.authority} {binding.unityPath} -> {binding.blenderObjectName}");
+            }
+
+            EditorGUILayout.LabelField("Timeline Bindings", lastSyncPolicy.timelineBindings.Length.ToString());
+            foreach (var binding in lastSyncPolicy.timelineBindings.Take(5))
+            {
+                EditorGUILayout.LabelField(
+                    binding.enabled ? binding.displayName : $"{binding.displayName} (disabled)",
+                    $"{binding.blenderSceneName}/{binding.blenderActionName} -> {binding.unityTimelineObjectId}");
+            }
+
+            EditorGUILayout.LabelField("Sync Vars", lastSyncPolicy.syncVars.Length.ToString());
+            foreach (var syncVar in lastSyncPolicy.syncVars.Take(8))
+            {
+                var label = syncVar.enabled ? syncVar.displayName : $"{syncVar.displayName} (disabled)";
+                EditorGUILayout.LabelField(
+                    label,
+                    $"{syncVar.kind} {syncVar.authority} {syncVar.unityPropertyPath} <-> {syncVar.blenderPropertyPath}");
+            }
         }
 
         private void DrawAssetCommandSection()
@@ -230,8 +276,14 @@ namespace GameCult.Brokkr.Editor
 
             EditorGUILayout.Space();
             prefabAssetPath = EditorGUILayout.TextField("Prefab Asset Path", prefabAssetPath);
+            prefabMirrorCollectionName = EditorGUILayout.TextField("Blender Collection", prefabMirrorCollectionName);
             prefabInstanceName = EditorGUILayout.TextField("Instance Name", prefabInstanceName);
             prefabVariantPath = EditorGUILayout.TextField("Variant Path", prefabVariantPath);
+
+            if (GUILayout.Button("Mirror Prefab To Blender"))
+            {
+                PublishPrefabMirrorSnapshot();
+            }
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -433,6 +485,22 @@ namespace GameCult.Brokkr.Editor
             }
         }
 
+        private void RefreshSyncPolicy()
+        {
+            try
+            {
+                RequireMirror();
+                lastSyncPolicy = mirror.SnapshotSyncPolicy();
+                SetStatus(
+                    $"Loaded sync policy: {lastSyncPolicy.objectBindings.Length} object binding(s), {lastSyncPolicy.timelineBindings.Length} timeline binding(s), {lastSyncPolicy.syncVars.Length} sync var(s).",
+                    MessageType.Info);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
         private void PublishCreateScriptableObjectCommand()
         {
             try
@@ -509,6 +577,25 @@ namespace GameCult.Brokkr.Editor
                         : prefabVariantPath.Trim()
                 };
                 PublishCommandAndPoll(command);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private void PublishPrefabMirrorSnapshot()
+        {
+            try
+            {
+                RequireMirror();
+                var snapshot = BrokkrUnitySnapshotBuilder.CapturePrefabMirror(
+                    prefabAssetPath,
+                    prefabMirrorCollectionName);
+                mirror.PublishPrefabMirrorSnapshotAsync(snapshot).GetAwaiter().GetResult();
+                SetStatus(
+                    $"Published Unity prefab mirror for Blender: {snapshot.prefabName} ({snapshot.nodes.Length} node(s), {snapshot.assets.Length} asset requirement(s)).",
+                    MessageType.Info);
             }
             catch (Exception error)
             {

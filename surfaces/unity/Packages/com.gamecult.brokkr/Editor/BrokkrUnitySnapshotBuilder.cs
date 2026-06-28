@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using GameCult.Brokkr;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -45,6 +47,46 @@ namespace GameCult.Brokkr.Editor
                 sceneObjects = CaptureSceneObjects(),
                 assets = CaptureAssets()
             };
+        }
+
+        internal static BrokkrUnityPrefabMirrorSnapshot CapturePrefabMirror(
+            string prefabAssetPath,
+            string blenderCollectionName)
+        {
+            if (string.IsNullOrWhiteSpace(prefabAssetPath))
+            {
+                throw new InvalidOperationException("Enter a prefab asset path before mirroring to Blender.");
+            }
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabAssetPath.Trim());
+            if (prefab == null)
+            {
+                throw new InvalidOperationException($"Prefab was not found: {prefabAssetPath}");
+            }
+
+            var nodes = new List<BrokkrUnityPrefabNodeSnapshot>();
+            var assets = new Dictionary<string, BrokkrUnityPrefabAssetRequirement>(StringComparer.Ordinal);
+            CapturePrefabNode(prefab, "", prefab.name, nodes, assets);
+
+            var observedAt = DateTime.UtcNow.ToString("O");
+            var prefabId = AssetDatabase.AssetPathToGUID(prefabAssetPath);
+            var snapshot = new BrokkrUnityPrefabMirrorSnapshot
+            {
+                prefabId = string.IsNullOrWhiteSpace(prefabId) ? prefab.name : prefabId,
+                prefabAssetPath = prefabAssetPath.Trim(),
+                prefabName = prefab.name,
+                blenderCollectionName = string.IsNullOrWhiteSpace(blenderCollectionName)
+                    ? prefab.name
+                    : blenderCollectionName.Trim(),
+                observedAt = observedAt,
+                nodes = nodes.ToArray(),
+                assets = assets.Values
+                    .OrderBy(asset => asset.assetId, StringComparer.Ordinal)
+                    .ToArray()
+            };
+            snapshot.contentHash = ComputePrefabMirrorHash(snapshot);
+            snapshot.snapshotId = StableId("unity-prefab", snapshot.prefabId, snapshot.contentHash.Substring(0, 16));
+            return snapshot;
         }
 
         private static BrokkrGameObjectSnapshot[] CaptureSceneObjects()
@@ -99,6 +141,126 @@ namespace GameCult.Brokkr.Editor
                 var child = gameObject.transform.GetChild(childIndex).gameObject;
                 CaptureGameObject(child, scene, $"{path}/{child.name}", objectId, objects);
             }
+        }
+
+        private static void CapturePrefabNode(
+            GameObject gameObject,
+            string parentNodeId,
+            string path,
+            ICollection<BrokkrUnityPrefabNodeSnapshot> nodes,
+            IDictionary<string, BrokkrUnityPrefabAssetRequirement> assets)
+        {
+            var nodeId = StableId("node", path);
+            var meshAssetId = CaptureMeshRequirement(gameObject, assets);
+            var materialAssetIds = CaptureMaterialRequirements(gameObject, assets);
+            nodes.Add(new BrokkrUnityPrefabNodeSnapshot
+            {
+                nodeId = nodeId,
+                parentNodeId = parentNodeId,
+                name = gameObject.name,
+                path = path,
+                activeSelf = gameObject.activeSelf,
+                tag = gameObject.tag,
+                layer = gameObject.layer,
+                localPosition = WriteVector3(gameObject.transform.localPosition),
+                localEulerAngles = WriteVector3(gameObject.transform.localEulerAngles),
+                localScale = WriteVector3(gameObject.transform.localScale),
+                meshAssetId = meshAssetId,
+                materialAssetIds = materialAssetIds,
+                components = CaptureComponents(gameObject)
+            });
+
+            for (var childIndex = 0; childIndex < gameObject.transform.childCount; childIndex++)
+            {
+                var child = gameObject.transform.GetChild(childIndex).gameObject;
+                CapturePrefabNode(child, nodeId, $"{path}/{child.name}", nodes, assets);
+            }
+        }
+
+        private static string CaptureMeshRequirement(
+            GameObject gameObject,
+            IDictionary<string, BrokkrUnityPrefabAssetRequirement> assets)
+        {
+            var mesh = gameObject.GetComponent<MeshFilter>()?.sharedMesh;
+            if (mesh == null)
+            {
+                var skinned = gameObject.GetComponent<SkinnedMeshRenderer>();
+                mesh = skinned != null ? skinned.sharedMesh : null;
+            }
+
+            return mesh == null ? "" : AddAssetRequirement(assets, "mesh", mesh);
+        }
+
+        private static string[] CaptureMaterialRequirements(
+            GameObject gameObject,
+            IDictionary<string, BrokkrUnityPrefabAssetRequirement> assets)
+        {
+            var renderer = gameObject.GetComponent<Renderer>();
+            if (renderer == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            var result = new List<string>();
+            foreach (var material in renderer.sharedMaterials.Where(material => material != null))
+            {
+                var materialId = AddAssetRequirement(assets, "material", material);
+                result.Add(materialId);
+                CaptureTextureRequirements(material, assets);
+            }
+
+            return result.ToArray();
+        }
+
+        private static void CaptureTextureRequirements(
+            Material material,
+            IDictionary<string, BrokkrUnityPrefabAssetRequirement> assets)
+        {
+            var shader = material.shader;
+            if (shader == null)
+            {
+                return;
+            }
+
+            var propertyCount = ShaderUtil.GetPropertyCount(shader);
+            for (var index = 0; index < propertyCount; index++)
+            {
+                if (ShaderUtil.GetPropertyType(shader, index) != ShaderUtil.ShaderPropertyType.TexEnv)
+                {
+                    continue;
+                }
+
+                var propertyName = ShaderUtil.GetPropertyName(shader, index);
+                var texture = material.GetTexture(propertyName);
+                if (texture != null)
+                {
+                    AddAssetRequirement(assets, "texture", texture);
+                }
+            }
+        }
+
+        private static string AddAssetRequirement(
+            IDictionary<string, BrokkrUnityPrefabAssetRequirement> assets,
+            string role,
+            UnityEngine.Object asset)
+        {
+            var path = AssetDatabase.GetAssetPath(asset);
+            var guid = string.IsNullOrWhiteSpace(path) ? "" : AssetDatabase.AssetPathToGUID(path);
+            var assetId = StableId(role, string.IsNullOrWhiteSpace(guid) ? asset.name : guid);
+            if (!assets.ContainsKey(assetId))
+            {
+                assets[assetId] = new BrokkrUnityPrefabAssetRequirement
+                {
+                    assetId = assetId,
+                    role = role,
+                    unityAssetPath = path,
+                    guid = guid,
+                    name = asset.name,
+                    typeName = asset.GetType().FullName
+                };
+            }
+
+            return assetId;
         }
 
         private static BrokkrComponentSnapshot[] CaptureComponents(GameObject gameObject)
@@ -259,6 +421,48 @@ namespace GameCult.Brokkr.Editor
                 value.x.ToString(CultureInfo.InvariantCulture),
                 value.y.ToString(CultureInfo.InvariantCulture),
                 value.z.ToString(CultureInfo.InvariantCulture));
+        }
+
+        private static string ComputePrefabMirrorHash(BrokkrUnityPrefabMirrorSnapshot snapshot)
+        {
+            var builder = new StringBuilder();
+            builder.Append(snapshot.prefabId).Append('\u001F')
+                .Append(snapshot.prefabAssetPath).Append('\u001F')
+                .Append(snapshot.prefabName).Append('\u001F')
+                .Append(snapshot.blenderCollectionName).Append('\u001F');
+            foreach (var node in snapshot.nodes.OrderBy(node => node.nodeId, StringComparer.Ordinal))
+            {
+                builder.Append(node.nodeId).Append('\u001E')
+                    .Append(node.parentNodeId).Append('\u001E')
+                    .Append(node.path).Append('\u001E')
+                    .Append(node.localPosition).Append('\u001E')
+                    .Append(node.localEulerAngles).Append('\u001E')
+                    .Append(node.localScale).Append('\u001E')
+                    .Append(node.meshAssetId).Append('\u001E')
+                    .Append(string.Join(",", node.materialAssetIds.OrderBy(value => value, StringComparer.Ordinal)))
+                    .Append('\u001F');
+            }
+
+            foreach (var asset in snapshot.assets.OrderBy(asset => asset.assetId, StringComparer.Ordinal))
+            {
+                builder.Append(asset.assetId).Append('\u001E')
+                    .Append(asset.role).Append('\u001E')
+                    .Append(asset.unityAssetPath).Append('\u001E')
+                    .Append(asset.guid).Append('\u001F');
+            }
+
+            using var sha256 = SHA256.Create();
+            return string.Concat(sha256
+                .ComputeHash(Encoding.UTF8.GetBytes(builder.ToString()))
+                .Select(value => value.ToString("x2", CultureInfo.InvariantCulture)));
+        }
+
+        private static string StableId(params string[] parts)
+        {
+            return string.Join(":", parts.Select(part => (part ?? "")
+                .Replace(" ", "_")
+                .Replace("/", "_")
+                .Replace("\\", "_")));
         }
     }
 }

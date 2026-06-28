@@ -152,6 +152,12 @@ namespace GameCult.Brokkr.Editor
             set => EditorPrefs.SetString("GameCult.Brokkr.PrefabVariantPath", value);
         }
 
+        internal static string PrefabMirrorCollectionName
+        {
+            get => EditorPrefs.GetString("GameCult.Brokkr.PrefabMirrorCollectionName", "");
+            set => EditorPrefs.SetString("GameCult.Brokkr.PrefabMirrorCollectionName", value);
+        }
+
         internal static string AdHocSyncVarBindingId
         {
             get => EditorPrefs.GetString("GameCult.Brokkr.AdHocSyncVarBindingId", "");

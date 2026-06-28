@@ -57,8 +57,32 @@ owns the mirror state.
     `Refresh Sync Receipt` to show the latest daemon sync pass observed in the
     Blender mirror. Keep `Auto Drain Commands` enabled while `sync-loop` is
     running if Blender should continuously consume daemon command intents.
-13. To publish an ad hoc sync variable, fill the `Ad Hoc Sync Var` fields in
+13. Click `Refresh Sync Policy` to inspect the object bindings, timeline
+    bindings, and sync vars currently published in the Blender mirror.
+14. To publish an ad hoc sync variable, fill the `Ad Hoc Sync Var` fields in
     the sidebar or add-on preferences and click `Publish Sync Var`.
+
+## CDN Prefab Authoring
+
+Brokkr Blender is the authoring side of the CultMesh CDN prefab pipeline.
+Existing Unity prefabs are mirrored into Blender once; after that, Blender owns
+the renderable entity configuration.
+
+1. In Unity, click `Mirror Prefab To Blender` for the legacy prefab.
+2. In Blender, click `Import Unity Prefab Mirror`. The add-on reads the latest
+   `brokkr.unity.prefab_mirror_snapshot.v0` document from the shared mirror and
+   creates or updates a collection.
+3. Configure the collection in Blender: meshes, transforms, materials, sockets,
+   custom properties, and runtime component metadata.
+4. Click `Publish Prefab Snapshot`. The add-on writes a
+   `brokkr.prefab.snapshot.v0` record containing the collection-scoped deploy
+   snapshot.
+5. A deployer consumes that snapshot, publishes binary payloads as CultMesh CDN
+   artifacts, and writes a `CultMeshEntityPrefabPackage`.
+
+The Blender deploy snapshot is not a Unity prefab file and not an FBX dump. It
+is a portable authoring snapshot that downstream Unity and TypeScript clients
+can receive through CultMesh CDN and lower into their own runtime object model.
 
 Admitted command actions:
 

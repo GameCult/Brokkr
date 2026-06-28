@@ -295,6 +295,12 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                 record_hint: "unity/quest-routes/{routeId}",
             },
             MirrorDocument {
+                name: "Unity prefab mirror snapshot",
+                schema: "brokkr.unity.prefab_mirror_snapshot.v0",
+                owner: "brokkr.unity_editor",
+                record_hint: "prefabs/unity-mirrors/{snapshotId}",
+            },
+            MirrorDocument {
                 name: "Unity warped video frame",
                 schema: "brokkr.unity.warped_video_frame.v0",
                 owner: "brokkr.unity_editor",
@@ -305,6 +311,12 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                 schema: "brokkr.blender.host_snapshot.v0",
                 owner: "brokkr.blender_editor",
                 record_hint: "blender/host/current",
+            },
+            MirrorDocument {
+                name: "Brokkr prefab snapshot",
+                schema: "brokkr.prefab.snapshot.v0",
+                owner: "brokkr.blender_editor",
+                record_hint: "prefabs/snapshots/{snapshotId}",
             },
             MirrorDocument {
                 name: "Blender command intent",
@@ -2049,6 +2061,11 @@ mod tests {
             "blender/host/current"
         )));
         assert!(documents.contains(&(
+            "brokkr.prefab.snapshot.v0",
+            "brokkr.blender_editor",
+            "prefabs/snapshots/{snapshotId}"
+        )));
+        assert!(documents.contains(&(
             "brokkr.blender.command_intent.v0",
             "Verse command clients",
             "blender/commands/{commandId}"
@@ -2057,6 +2074,11 @@ mod tests {
             "brokkr.blender.command_receipt.v0",
             "brokkr.blender_editor",
             "blender/receipts/{commandId}"
+        )));
+        assert!(documents.contains(&(
+            "brokkr.unity.prefab_mirror_snapshot.v0",
+            "brokkr.unity_editor",
+            "prefabs/unity-mirrors/{snapshotId}"
         )));
     }
 

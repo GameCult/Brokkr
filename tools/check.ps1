@@ -54,7 +54,8 @@ try {
         "GameCult.Caching.MessagePack.dll",
         "GameCult.Mesh.dll",
         "GameCult.Networking.dll",
-        "MessagePack.dll",
+        "MessagePack.CultMesh.dll",
+        "MessagePack.Annotations.dll",
         "R3.dll"
     )
 
@@ -63,6 +64,16 @@ try {
         if (-not (Test-Path $path)) {
             throw "Missing vendored CultMesh Unity dependency: $path"
         }
+    }
+
+    $staleMessagePackPath = Join-Path $pluginRoot "MessagePack.dll"
+    if (Test-Path $staleMessagePackPath) {
+        throw "Brokkr Unity package must not vendor MessagePack.dll; use MessagePack.CultMesh.dll to avoid colliding with Unity MessagePack.asmdef."
+    }
+
+    $staleVectorsPath = Join-Path $pluginRoot "System.Numerics.Vectors.dll"
+    if (Test-Path $staleVectorsPath) {
+        throw "Brokkr Unity package must not vendor System.Numerics.Vectors.dll; Unity provides the facade assembly and duplicate versions create resolver conflicts."
     }
 
     $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"

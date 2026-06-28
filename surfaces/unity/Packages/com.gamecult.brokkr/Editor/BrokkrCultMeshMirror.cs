@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using GameCult.Caching;
 using GameCult.Mesh;
@@ -65,6 +66,16 @@ namespace GameCult.Brokkr.Editor
         {
             RequireRunning();
             await node.Database.PutAsync(new CultRecordKey("unity/host/current"), snapshot);
+            await node.FlushAsync(soft: true);
+        }
+
+        internal async Task PublishPrefabMirrorSnapshotAsync(BrokkrUnityPrefabMirrorSnapshot snapshot)
+        {
+            RequireRunning();
+            var key = string.IsNullOrWhiteSpace(snapshot.snapshotId)
+                ? $"prefabs/unity-mirrors/{Guid.NewGuid():N}"
+                : $"prefabs/unity-mirrors/{snapshot.snapshotId}";
+            await node.Database.PutAsync(new CultRecordKey(key), snapshot);
             await node.FlushAsync(soft: true);
         }
 
@@ -148,6 +159,30 @@ namespace GameCult.Brokkr.Editor
             return false;
         }
 
+        internal BrokkrSyncPolicyView SnapshotSyncPolicy()
+        {
+            RequireRunning();
+            var documents = node.Database.Cache.AllStoredDocuments
+                .Select(stored => stored.Document)
+                .ToArray();
+            return new BrokkrSyncPolicyView
+            {
+                objectBindings = documents
+                    .OfType<BrokkrSyncObjectBinding>()
+                    .OrderBy(binding => binding.displayName, StringComparer.Ordinal)
+                    .ToArray(),
+                timelineBindings = documents
+                    .OfType<BrokkrSyncTimelineBinding>()
+                    .OrderBy(binding => binding.displayName, StringComparer.Ordinal)
+                    .ToArray(),
+                syncVars = documents
+                    .OfType<BrokkrSyncVar>()
+                    .OrderBy(syncVar => syncVar.bindingId, StringComparer.Ordinal)
+                    .ThenBy(syncVar => syncVar.displayName, StringComparer.Ordinal)
+                    .ToArray()
+            };
+        }
+
         internal static string DefaultCachePath()
         {
             var projectRoot = Application.dataPath.Replace("/Assets", "");
@@ -171,5 +206,12 @@ namespace GameCult.Brokkr.Editor
             node?.Dispose();
             node = null;
         }
+    }
+
+    internal sealed class BrokkrSyncPolicyView
+    {
+        internal BrokkrSyncObjectBinding[] objectBindings = Array.Empty<BrokkrSyncObjectBinding>();
+        internal BrokkrSyncTimelineBinding[] timelineBindings = Array.Empty<BrokkrSyncTimelineBinding>();
+        internal BrokkrSyncVar[] syncVars = Array.Empty<BrokkrSyncVar>();
     }
 }

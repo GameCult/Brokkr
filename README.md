@@ -55,6 +55,34 @@ timeline bindings, and receipts. Unity and Blender editor plugins publish those
 documents through CultMesh so a daemon sync loop can translate them into
 host-owned command intents without stealing scene truth.
 
+## Prefab CDN Pipeline
+
+Brokkr is the authoring front-end for CultMesh's distributed CDN entity prefab
+pipeline. Unity prefabs are migration input only. The intended flow is:
+
+1. In Unity, open `GameCult > Brokkr`, enter a prefab asset path, and click
+   `Mirror Prefab To Blender`.
+2. Unity writes a `brokkr.unity.prefab_mirror_snapshot.v0` document containing
+   the prefab hierarchy, transforms, components, mesh requirements, material
+   requirements, and texture requirements.
+3. In Blender, click `Import Unity Prefab Mirror` to create a Blender collection
+   from that snapshot. From this point forward, Blender owns the renderable
+   entity authoring state.
+4. In Blender, configure meshes, transforms, materials, metadata, sockets, and
+   runtime component hints in the collection.
+5. Click `Publish Prefab Snapshot` to write a collection-scoped
+   `brokkr.prefab.snapshot.v0` document.
+6. A deployer consumes the Brokkr prefab snapshot, publishes referenced binary
+   payloads as CultMesh CDN artifacts, and writes a
+   `CultMeshEntityPrefabPackage`.
+7. Unity, TypeScript, and later runtimes consume the same CultMesh package and
+   lower it into native runtime objects.
+
+The CDN is content-addressed and signed at the CultMesh layer. Brokkr does not
+turn players into authority for assets; it produces deploy snapshots that the
+CDN can distribute through central servers, LAN peers, or visible opt-out peer
+asset sharing.
+
 ## Unity Smoke
 
 ```powershell
