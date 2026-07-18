@@ -23,6 +23,10 @@ namespace GameCult.Brokkr
         [Key(11)] public string[] capabilities = Array.Empty<string>();
         [Key(12)] public BrokkrGameObjectSnapshot[] sceneObjects = Array.Empty<BrokkrGameObjectSnapshot>();
         [Key(13)] public BrokkrAssetSnapshot[] assets = Array.Empty<BrokkrAssetSnapshot>();
+        [Key(14)] public bool isPlaying;
+        [Key(15)] public bool isPaused;
+        [Key(16)] public bool isCompiling;
+        [Key(17)] public bool isUpdating;
     }
 
     [CultDocument("brokkr.unity.snapshot_receipt", "brokkr.unity.snapshot_receipt.v0")]
@@ -159,6 +163,10 @@ namespace GameCult.Brokkr
         [Key(10)] public string localPosition = "";
         [Key(11)] public string localEulerAngles = "";
         [Key(12)] public string localScale = "";
+        [Key(13)] public string viewKind = "";
+        [Key(14)] public string outputPath = "";
+        [Key(15)] public int width;
+        [Key(16)] public int height;
     }
 
     [MessagePackObject]

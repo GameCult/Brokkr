@@ -24,7 +24,7 @@
     "Microsoft.Bcl.TimeProvider.dll",
     "Microsoft.NET.StringTools.dll",
     "MessagePack.Annotations.dll",
-    "MessagePack.CultMesh.dll",
+    "MessagePack.dll",
     "R3.dll",
     "System.Collections.Immutable.dll",
     "System.IO.Pipelines.dll",

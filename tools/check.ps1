@@ -49,31 +49,14 @@ try {
     Assert-Contains $syncContractText "cinemachine-virtual-camera" "sync contract"
 
     $pluginRoot = Join-Path (Get-Location) "surfaces\unity\Packages\com.gamecult.brokkr\Plugins\CultMesh"
-    $requiredDlls = @(
-        "GameCult.Caching.dll",
-        "GameCult.Caching.MessagePack.dll",
-        "GameCult.Mesh.dll",
-        "GameCult.Networking.dll",
-        "MessagePack.CultMesh.dll",
-        "MessagePack.Annotations.dll",
-        "R3.dll"
-    )
-
-    foreach ($dll in $requiredDlls) {
-        $path = Join-Path $pluginRoot $dll
-        if (-not (Test-Path $path)) {
-            throw "Missing vendored CultMesh Unity dependency: $path"
-        }
+    $vendoredDlls = @(Get-ChildItem $pluginRoot -Filter "*.dll" -ErrorAction SilentlyContinue)
+    if ($vendoredDlls.Count -ne 0) {
+        throw "Brokkr Unity package must consume the host CultLib package, not vendor transport DLLs: $($vendoredDlls.Name -join ', ')"
     }
 
-    $staleMessagePackPath = Join-Path $pluginRoot "MessagePack.dll"
-    if (Test-Path $staleMessagePackPath) {
-        throw "Brokkr Unity package must not vendor MessagePack.dll; use MessagePack.CultMesh.dll to avoid colliding with Unity MessagePack.asmdef."
-    }
-
-    $staleVectorsPath = Join-Path $pluginRoot "System.Numerics.Vectors.dll"
-    if (Test-Path $staleVectorsPath) {
-        throw "Brokkr Unity package must not vendor System.Numerics.Vectors.dll; Unity provides the facade assembly and duplicate versions create resolver conflicts."
+    $brokkrPackage = Get-Content "surfaces\unity\Packages\com.gamecult.brokkr\package.json" -Raw | ConvertFrom-Json
+    if ($brokkrPackage.dependencies.'org.gamecult.cultlib' -ne '1.0.16') {
+        throw "Brokkr Unity package must declare org.gamecult.cultlib 1.0.16 as its transport owner."
     }
 
     $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"

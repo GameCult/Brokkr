@@ -26,6 +26,9 @@ Primary Eve surface id: `brokkr.eve.tool_broker.v0`
 - `gameobject.create`
 - `component.attach`
 - `component.property.write`
+- `editor.assets.refresh`
+- `editor.lifecycle.write`
+- `editor.view.capture`
 - `command.receipt.publish`
 - `eve.gui.publish`
 - `eve.tui.publish`
@@ -72,6 +75,10 @@ Primary sync documents:
 
 Operational commands:
 
+- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPlayState --value true`
+- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPaused --value true`
+- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action refreshAssets`
+- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action captureEditorView --view scene --output artifacts/scene.png`
 - `brokkr-daemon sync-once --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp`
 - `brokkr-daemon sync-loop --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp --interval-ms 500`
 

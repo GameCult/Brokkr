@@ -12,22 +12,16 @@ Add this package to a Unity project's `Packages/manifest.json`:
 "com.gamecult.brokkr": "file:E:/Projects/Brokkr/surfaces/unity/Packages/com.gamecult.brokkr"
 ```
 
-Vendor the CultMesh runtime DLLs before opening Unity:
+The host project must also resolve the released CultLib Unity package. For a
+Git-based GameCult checkout, pin it explicitly in the same manifest:
 
-```powershell
-.\tools\vendor-cultmesh-unity.ps1
+```json
+"org.gamecult.cultlib": "https://github.com/GameCult/CultLib.git?path=/unity/org.gamecult.cultlib#cultlib-unity-v1.0.16"
 ```
 
-The vendor script intentionally copies the MessagePack runtime as
-`MessagePack.CultMesh.dll` and removes any sibling `MessagePack.dll`. Unity
-projects can already contain a `MessagePack.asmdef`, and importing a DLL with
-the same filename makes Unity resolve the wrong assembly identity. Keep
-`MessagePack.CultMesh.dll` and `MessagePack.Annotations.dll` on the same
-MessagePack package version as CultMesh.
-
-The script also removes `System.Numerics.Vectors.dll`. Unity provides that
-facade assembly through its reference assemblies, so the package should not
-ship a second facade DLL with a different identity.
+Brokkr does not carry a private CultMesh runtime. The host's CultLib package is
+the single transport assembly owner, so editor commands and the rest of the
+project exchange the same typed documents in the same AppDomain.
 
 Then open `GameCult > Brokkr`.
 
@@ -40,6 +34,16 @@ In Unity:
 3. Confirm `CultMesh Cache` points at `.brokkr/unity-editor.ccmp`.
 4. Click `Start CultMesh Mirror`.
 5. Click `Capture Snapshot`.
+
+The editor bridge starts automatically and executes typed commands from the
+same CultCache mirror. Common lifecycle commands can be issued without UI
+automation:
+
+```powershell
+cargo run --manifest-path E:/Projects/Brokkr/brokkr-daemon/Cargo.toml -- unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPlayState --value true
+cargo run --manifest-path E:/Projects/Brokkr/brokkr-daemon/Cargo.toml -- unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPaused --value true
+cargo run --manifest-path E:/Projects/Brokkr/brokkr-daemon/Cargo.toml -- unity-command --unity-cache .brokkr/unity-editor.ccmp --action captureEditorView --view scene --output artifacts/scene.png
+```
 6. Click `Publish Mirror`.
 7. To create a ScriptableObject through the mirror, fill `ScriptableObject Type`,
    `Asset Name`, and `Asset Path`, then click `Create ScriptableObject Asset`.
