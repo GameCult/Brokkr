@@ -7,6 +7,33 @@ using var cache = await CultCacheMessagePack.OpenAsync(options.CachePath, new Cu
 {
     UseDirectoryStore = true
 });
+if (string.Equals(options.Action, "readHost", StringComparison.Ordinal))
+{
+    await cache.PullAllBackingStoresAsync();
+    var hostKey = new CultRecordKey("unity/host/current");
+    if (!cache.TryGet(hostKey, out BrokkrHostSnapshot? host) || host == null)
+    {
+        throw new InvalidOperationException($"Brokkr host snapshot '{hostKey.Value}' is unavailable.");
+    }
+
+    Console.WriteLine($"project: {host.projectPath}");
+    Console.WriteLine($"observed: {host.observedAt}");
+    Console.WriteLine($"scene: {host.activeScenePath}");
+    Console.WriteLine($"state: playing={host.isPlaying} paused={host.isPaused} compiling={host.isCompiling} updating={host.isUpdating}");
+    Console.WriteLine($"objects: {host.sceneObjects.Length}");
+    foreach (var sceneObject in host.sceneObjects.OrderBy(item => item.path, StringComparer.Ordinal))
+    {
+        var components = string.Join(", ", sceneObject.components.Select(component => component.typeName));
+        Console.WriteLine($"- {sceneObject.path} active={sceneObject.activeSelf} layer={sceneObject.layer} components=[{components}]");
+        foreach (var component in sceneObject.components)
+        foreach (var property in component.properties.Where(property =>
+                     !property.path.StartsWith("m_", StringComparison.Ordinal) &&
+                     !string.IsNullOrWhiteSpace(property.value)))
+            Console.WriteLine($"  {component.typeName}.{property.path}={property.value}");
+    }
+    return;
+}
+
 var command = new BrokkrUnityCommand
 {
     commandId = options.CommandId,
