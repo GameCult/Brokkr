@@ -173,7 +173,7 @@ namespace GameCult.Brokkr
     [Serializable]
     public sealed class BrokkrUnityCommandEnvelope
     {
-        [Key(0)] public BrokkrUnityCommand command;
+        [Key(0)] public BrokkrUnityCommand command = new();
     }
 
     [CultDocument("brokkr.unity.command_receipt", "brokkr.unity.command_receipt.v0")]

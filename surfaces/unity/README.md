@@ -40,9 +40,9 @@ same CultCache mirror. Common lifecycle commands can be issued without UI
 automation:
 
 ```powershell
-cargo run --manifest-path E:/Projects/Brokkr/brokkr-daemon/Cargo.toml -- unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPlayState --value true
-cargo run --manifest-path E:/Projects/Brokkr/brokkr-daemon/Cargo.toml -- unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPaused --value true
-cargo run --manifest-path E:/Projects/Brokkr/brokkr-daemon/Cargo.toml -- unity-command --unity-cache .brokkr/unity-editor.ccmp --action captureEditorView --view scene --output artifacts/scene.png
+dotnet run --project E:/Projects/Brokkr/brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action setEditorPlayState --value true
+dotnet run --project E:/Projects/Brokkr/brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action setEditorPaused --value true
+dotnet run --project E:/Projects/Brokkr/brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action captureEditorView --view scene --output artifacts/scene.png
 ```
 6. Click `Publish Mirror`.
 7. To create a ScriptableObject through the mirror, fill `ScriptableObject Type`,

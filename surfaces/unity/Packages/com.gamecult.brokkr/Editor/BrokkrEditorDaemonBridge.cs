@@ -6,7 +6,7 @@ namespace GameCult.Brokkr.Editor
     [InitializeOnLoad]
     public static class BrokkrEditorDaemonBridge
     {
-        private const string AutoStartKey = "GameCult.Brokkr.AutoStartMirror";
+        private static string AutoStartKey => $"GameCult.Brokkr.AutoStartMirror.{UnityEngine.Application.dataPath}";
         private static readonly BrokkrCultMeshMirror Mirror = new();
         private static double nextPollAt;
         private static bool startQueued;
@@ -37,14 +37,14 @@ namespace GameCult.Brokkr.Editor
         }
 
         [MenuItem("GameCult/Brokkr/Start Daemon Bridge")]
-        private static void StartDaemonBridge()
+        public static void StartDaemonBridge()
         {
             AutoStart = true;
             EnsureStarted();
         }
 
         [MenuItem("GameCult/Brokkr/Stop Daemon Bridge")]
-        private static void StopDaemonBridge()
+        public static void StopDaemonBridge()
         {
             AutoStart = false;
             Mirror.Dispose();
@@ -104,6 +104,7 @@ namespace GameCult.Brokkr.Editor
             }
 
             nextPollAt = EditorApplication.timeSinceStartup + 1.0;
+            Mirror.PullExternalUpdatesAsync().GetAwaiter().GetResult();
             DrainCommands();
             DrainSyncReceipts();
         }

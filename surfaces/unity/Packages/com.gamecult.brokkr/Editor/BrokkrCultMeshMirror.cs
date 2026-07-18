@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using GameCult.Caching;
+using GameCult.Caching.MessagePack;
 using GameCult.Mesh;
 using GameCult.Networking;
 using R3;
@@ -33,8 +34,13 @@ namespace GameCult.Brokkr.Editor
             CachePath = cachePath;
             Directory.CreateDirectory(Path.GetDirectoryName(cachePath) ?? ".");
 
-            node = await CultMesh.StartNodeAsync(cachePath, new CultMeshNodeOptions
+            node = await CultMesh.CreateNodeAsync(cachePath, new CultMeshNodeOptions
             {
+                StartServer = false,
+                CacheOptions = new CultCacheOpenOptions
+                {
+                    UseDirectoryStore = true
+                },
                 EnableDurableShardLogs = true,
                 DatabaseOptions = new CultNetDatabaseOptions
                 {
@@ -67,6 +73,12 @@ namespace GameCult.Brokkr.Editor
             RequireRunning();
             await node.Database.PutAsync(new CultRecordKey("unity/host/current"), snapshot);
             await node.FlushAsync(soft: true);
+        }
+
+        internal Task PullExternalUpdatesAsync()
+        {
+            RequireRunning();
+            return node.Cache.PullAllBackingStoresAsync();
         }
 
         internal async Task PublishPrefabMirrorSnapshotAsync(BrokkrUnityPrefabMirrorSnapshot snapshot)

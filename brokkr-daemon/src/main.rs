@@ -131,12 +131,11 @@ fn main() -> Result<()> {
     match command.as_str() {
         "provider" | "smoke" => print_provider(),
         "sync-contract" => print_sync_contract(),
-        "unity-command" => unity_command(UnityCommandArgs::parse(args.collect())?),
         "sync-once" => sync_once(SyncArgs::parse(args.collect())?),
         "sync-loop" => sync_loop(SyncLoopArgs::parse(args.collect())?),
         _ => {
             eprintln!(
-                "usage: brokkr-daemon [provider|smoke|sync-contract|unity-command --unity-cache PATH --action ACTION [--value VALUE] [--view game|scene] [--output PATH] [--width N] [--height N] [--command-id ID]|sync-once --unity-cache PATH --blender-cache PATH [--dry-run]|sync-loop --unity-cache PATH --blender-cache PATH [--interval-ms N] [--max-passes N] [--dry-run]]"
+                "usage: brokkr-daemon [provider|smoke|sync-contract|sync-once --unity-cache PATH --blender-cache PATH [--dry-run]|sync-loop --unity-cache PATH --blender-cache PATH [--interval-ms N] [--max-passes N] [--dry-run]]"
             );
             std::process::exit(2);
         }
@@ -179,42 +178,6 @@ fn sync_loop(args: SyncLoopArgs) -> Result<()> {
 
         thread::sleep(Duration::from_millis(args.interval_ms));
     }
-}
-
-fn unity_command(args: UnityCommandArgs) -> Result<()> {
-    let command_id = args
-        .command_id
-        .unwrap_or_else(|| stable_id(["unity-command", &args.action, &chrono_like_timestamp_id()]));
-    let command = json!([
-        "brokkr.unity.command_intent.v0",
-        command_id,
-        args.action,
-        "",
-        "",
-        "",
-        "",
-        args.value,
-        "",
-        "",
-        "",
-        "",
-        "",
-        args.view_kind,
-        args.output_path,
-        args.width,
-        args.height
-    ]);
-    let mut store = MirrorStore::open(&args.unity_cache)?;
-    let command_id = command[1]
-        .as_str()
-        .ok_or_else(|| anyhow!("generated Unity command has no command id"))?;
-    store.put_messagepack_document(
-        "brokkr.unity.command_intent.v0",
-        &format!("unity/commands/{command_id}"),
-        &command,
-    )?;
-    println!("{command_id}");
-    Ok(())
 }
 
 fn build_provider_advertisement() -> ProviderAdvertisement {
@@ -539,76 +502,6 @@ struct SyncArgs {
     unity_cache: PathBuf,
     blender_cache: PathBuf,
     dry_run: bool,
-}
-
-#[derive(Debug, Clone)]
-struct UnityCommandArgs {
-    unity_cache: PathBuf,
-    action: String,
-    value: String,
-    view_kind: String,
-    output_path: String,
-    width: i64,
-    height: i64,
-    command_id: Option<String>,
-}
-
-impl UnityCommandArgs {
-    fn parse(args: Vec<String>) -> Result<Self> {
-        let mut unity_cache = None;
-        let mut action = None;
-        let mut value = String::new();
-        let mut view_kind = String::new();
-        let mut output_path = String::new();
-        let mut width = 0;
-        let mut height = 0;
-        let mut command_id = None;
-        let mut index = 0;
-
-        while index < args.len() {
-            let option = args[index].as_str();
-            index += 1;
-            let required_value = |index: usize| {
-                args.get(index)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("{option} requires a value"))
-            };
-            match option {
-                "--unity-cache" => unity_cache = Some(PathBuf::from(required_value(index)?)),
-                "--action" => action = Some(required_value(index)?),
-                "--value" => value = required_value(index)?,
-                "--view" => view_kind = required_value(index)?,
-                "--output" => output_path = required_value(index)?,
-                "--width" => {
-                    let raw = required_value(index)?;
-                    width = raw
-                        .parse()
-                        .with_context(|| format!("invalid --width value: {raw}"))?;
-                }
-                "--height" => {
-                    let raw = required_value(index)?;
-                    height = raw
-                        .parse()
-                        .with_context(|| format!("invalid --height value: {raw}"))?;
-                }
-                "--command-id" => command_id = Some(required_value(index)?),
-                other => return Err(anyhow!("unknown unity-command argument: {other}")),
-            }
-            index += 1;
-        }
-
-        Ok(Self {
-            unity_cache: unity_cache
-                .ok_or_else(|| anyhow!("unity-command requires --unity-cache"))?,
-            action: action.ok_or_else(|| anyhow!("unity-command requires --action"))?,
-            value,
-            view_kind,
-            output_path,
-            width,
-            height,
-            command_id,
-        })
-    }
 }
 
 impl SyncArgs {
@@ -2101,52 +1994,6 @@ fn chrono_like_timestamp_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unity_command_writes_typed_editor_lifecycle_intent() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let cache = temp.path().join("unity-editor.ccmp");
-        let args = UnityCommandArgs::parse(vec![
-            "--unity-cache".into(),
-            cache.display().to_string(),
-            "--action".into(),
-            "captureEditorView".into(),
-            "--view".into(),
-            "scene".into(),
-            "--output".into(),
-            "artifacts/scene.png".into(),
-            "--width".into(),
-            "1280".into(),
-            "--height".into(),
-            "720".into(),
-            "--command-id".into(),
-            "capture-scene-test".into(),
-        ])?;
-
-        unity_command(args)?;
-
-        let mut store = MirrorStore::open(&cache)?;
-        let document = store
-            .documents()?
-            .into_iter()
-            .find(|item| item.key == "unity/commands/capture-scene-test")
-            .expect("Unity editor command should be written");
-        assert_eq!(
-            field_string(&document.value, 2, "action").as_deref(),
-            Some("captureEditorView")
-        );
-        assert_eq!(
-            field_string(&document.value, 13, "viewKind").as_deref(),
-            Some("scene")
-        );
-        assert_eq!(
-            field_string(&document.value, 14, "outputPath").as_deref(),
-            Some("artifacts/scene.png")
-        );
-        assert_eq!(field_i64(&document.value, 15, "width"), Some(1280));
-        assert_eq!(field_i64(&document.value, 16, "height"), Some(720));
-        Ok(())
-    }
 
     #[test]
     fn provider_advertises_muninn_owned_quest_routes_for_unity() {

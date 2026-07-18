@@ -75,10 +75,10 @@ Primary sync documents:
 
 Operational commands:
 
-- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPlayState --value true`
-- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action setEditorPaused --value true`
-- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action refreshAssets`
-- `brokkr-daemon unity-command --unity-cache .brokkr/unity-editor.ccmp --action captureEditorView --view scene --output artifacts/scene.png`
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action setEditorPlayState --value true`
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action setEditorPaused --value true`
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action refreshAssets`
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action captureEditorView --view scene --output artifacts/scene.png`
 - `brokkr-daemon sync-once --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp`
 - `brokkr-daemon sync-loop --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp --interval-ms 500`
 
