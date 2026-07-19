@@ -17,6 +17,8 @@ namespace GameCult.Brokkr.Editor
     {
         private readonly Queue<BrokkrUnityCommand> commandQueue = new();
         private readonly Queue<BrokkrSyncReceipt> syncReceiptQueue = new();
+        private readonly HashSet<string> queuedCommandIds = new(StringComparer.Ordinal);
+        private readonly HashSet<string> completedCommandIds = new(StringComparer.Ordinal);
         private CultMeshNode node;
         private IDisposable commandSubscription;
         private IDisposable syncReceiptSubscription;
@@ -48,14 +50,17 @@ namespace GameCult.Brokkr.Editor
                 }
             });
 
+            commandQueue.Clear();
+            queuedCommandIds.Clear();
+            completedCommandIds.Clear();
+            RefreshCommandState();
+
             commandSubscription = node.Database
                 .Watch<BrokkrUnityCommand>()
                 .Subscribe(change =>
                 {
                     if (change.Document != null)
-                    {
-                        commandQueue.Enqueue(change.Document);
-                    }
+                        TryQueueCommand(change.Document);
                 });
             syncReceiptSubscription = node.Database
                 .Watch<BrokkrSyncReceipt>()
@@ -75,10 +80,11 @@ namespace GameCult.Brokkr.Editor
             await node.FlushAsync(soft: true);
         }
 
-        internal Task PullExternalUpdatesAsync()
+        internal async Task PullExternalUpdatesAsync()
         {
             RequireRunning();
-            return node.Cache.PullAllBackingStoresAsync();
+            await node.Cache.PullAllBackingStoresAsync();
+            RefreshCommandState();
         }
 
         internal async Task PublishPrefabMirrorSnapshotAsync(BrokkrUnityPrefabMirrorSnapshot snapshot)
@@ -99,6 +105,11 @@ namespace GameCult.Brokkr.Editor
                 : $"unity/receipts/{receipt.commandId}";
             await node.Database.PutAsync(new CultRecordKey(key), receipt);
             await node.FlushAsync(soft: true);
+            if (!string.IsNullOrWhiteSpace(receipt.commandId))
+            {
+                completedCommandIds.Add(receipt.commandId);
+                queuedCommandIds.Remove(receipt.commandId);
+            }
         }
 
         internal async Task PublishCommandAsync(BrokkrUnityCommand command)
@@ -149,14 +160,59 @@ namespace GameCult.Brokkr.Editor
 
         internal bool TryDequeueCommand(out BrokkrUnityCommand command)
         {
-            if (commandQueue.Count > 0)
+            while (commandQueue.Count > 0)
             {
-                command = commandQueue.Dequeue();
+                var candidate = commandQueue.Dequeue();
+                queuedCommandIds.Remove(candidate.commandId);
+                if (HasReceipt(candidate.commandId))
+                {
+                    continue;
+                }
+
+                command = candidate;
                 return true;
             }
 
             command = null;
             return false;
+        }
+
+        private void RefreshCommandState()
+        {
+            var documents = node.Database.Cache.AllStoredDocuments.ToArray();
+            foreach (var receipt in documents
+                         .Select(stored => stored.Document)
+                         .OfType<BrokkrUnityCommandReceipt>())
+            {
+                if (!string.IsNullOrWhiteSpace(receipt.commandId))
+                    completedCommandIds.Add(receipt.commandId);
+            }
+
+            foreach (var command in documents
+                         .Where(stored => stored.Document is BrokkrUnityCommand)
+                         .OrderBy(stored => stored.StoredAt, StringComparer.Ordinal)
+                         .ThenBy(stored => stored.Key.Value, StringComparer.Ordinal)
+                         .Select(stored => (BrokkrUnityCommand)stored.Document))
+                TryQueueCommand(command);
+        }
+
+        private void TryQueueCommand(BrokkrUnityCommand command)
+        {
+            if (string.IsNullOrWhiteSpace(command.commandId) ||
+                HasReceipt(command.commandId) ||
+                !queuedCommandIds.Add(command.commandId))
+                return;
+            commandQueue.Enqueue(command);
+        }
+
+        private bool HasReceipt(string commandId)
+        {
+            if (node == null || string.IsNullOrWhiteSpace(commandId))
+            {
+                return false;
+            }
+
+            return completedCommandIds.Contains(commandId);
         }
 
         internal bool TryDequeueSyncReceipt(out BrokkrSyncReceipt receipt)
