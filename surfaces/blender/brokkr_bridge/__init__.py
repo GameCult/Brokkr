@@ -50,7 +50,7 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         name="CultLib Python Source",
         subtype="DIR_PATH",
         default=DEFAULT_CULTLIB_PY_SRC,
-        description="Path to CultLib packages/cultcache-py/src when cultcache-py is not installed in Blender",
+        description="Path to the CultLib packages directory when cultcache-py, cultnet-py and cultmesh-py are not installed in Blender",
     )
 
     debug_mirror_root: bpy.props.StringProperty(

@@ -13,7 +13,11 @@ PROVIDER_ID = "brokkr.blender_editor"
 TOOL_KIND = "blender-editor"
 DEFAULT_BROKER_URI = "cultmesh://brokkr"
 DEFAULT_CULTMESH_CACHE_PATH = "//.brokkr/blender-editor.ccmp"
-DEFAULT_CULTLIB_PY_SRC = "E:/Projects/CultLib-main-work/packages/cultcache-py/src"
+# The CultLib `packages` directory. The Python runtime is three layered
+# packages there (cultcache-py, cultnet-py, cultmesh-py); each one's `src` is
+# added to sys.path when they are not installed into Blender's interpreter.
+DEFAULT_CULTLIB_PY_SRC = "F:/Projects/CultLib/packages"
+CULTLIB_PY_PACKAGES = ("cultcache-py", "cultnet-py", "cultmesh-py")
 DEFAULT_DEBUG_MIRROR_ROOT = "//.brokkr/blender-editor-debug"
 
 HOST_SNAPSHOT_SCHEMA = "brokkr.blender.host_snapshot.v0"
@@ -692,18 +696,20 @@ class BrokkrBlenderTarget:
 
 
 def _load_cultmesh(cultlib_py_src: str) -> tuple[Any, Any]:
-    source = Path(cultlib_py_src or DEFAULT_CULTLIB_PY_SRC)
-    if source.exists():
-        source_text = str(source)
-        if source_text not in sys.path:
-            sys.path.insert(0, source_text)
+    packages = Path(cultlib_py_src or DEFAULT_CULTLIB_PY_SRC)
+    for name in CULTLIB_PY_PACKAGES:
+        source = packages / name / "src"
+        if source.exists():
+            source_text = str(source)
+            if source_text not in sys.path:
+                sys.path.insert(0, source_text)
     try:
         import cultmesh_py  # type: ignore
         import cultcache_py  # type: ignore
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "Brokkr Blender target requires CultLib's Python CultMesh package. Set CultLib Python Source "
-            "to the CultLib packages/cultcache-py/src directory or install cultcache-py into Blender's Python."
+            "Brokkr Blender target requires CultLib's Python packages. Set CultLib Python Source "
+            "to the CultLib packages directory or install cultcache-py, cultnet-py and cultmesh-py into Blender's Python."
         ) from exc
     return cultmesh_py, cultcache_py
 

@@ -8,11 +8,12 @@ target surface for host snapshots, admitted command intents, and command
 receipts.
 
 The adapter writes its mirror documents through CultLib's Python CultMesh node.
-If `cultcache-py`/`cultmesh_py` is not installed into Blender's Python, point
-`CultLib Python Source` at:
+If `cultcache-py`, `cultnet-py` and `cultmesh-py` are not installed into
+Blender's Python, point `CultLib Python Source` at the CultLib packages
+directory; the add-on puts each package's `src` on `sys.path`:
 
 ```text
-E:/Projects/CultLib-main-work/packages/cultcache-py/src
+F:/Projects/CultLib/packages
 ```
 
 The default node cache is:
