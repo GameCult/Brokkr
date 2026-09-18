@@ -1,5 +1,14 @@
 # Brokkr Agent Access: Cut Map
 
+> **Parked (operator, 2026-09-18): "screw it, I'll do any editor shenanigans we need for
+> now."** Nothing here is started. The immediate consumer (rigging a scene in Aetheria,
+> `F:\Projects\Aetheria\docs\shield-panel-cut.md` Cut 4) is the operator's hands instead.
+> Unpark this when editor work becomes repetitive enough to be worth six cuts in this repo,
+> or when the CultMesh MCP bridge campaign
+> (`F:\Projects\CultLib\src\GameCult.Mesh\docs\mcp-bridge-campaign.md`) takes it up. The
+> probe results below keep their value either way: no `serve` command, a vendored-assembly
+> collision with CultLib, the file-poke path being dead, and no admission at all.
+
 Status: cut map, nothing landed. Ends: an agent process on this box sends a typed
 `brokkr.unity.command_intent.v0` to a live Unity editor, the editor executes it,
 and the agent reads back `brokkr.unity.command_receipt.v0` plus a refreshed
