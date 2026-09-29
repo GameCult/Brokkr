@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -30,6 +31,15 @@ namespace GameCult.Brokkr.Editor
         }
 
         private static string ProjectKey(string name) => $"GameCult.Brokkr.{name}.{Application.dataPath}";
+
+        // The actions this project lets an agent run (comma separated). Asset-writing actions and saveScene are
+        // absent until the operator adds them.
+        internal static string[] AllowedAgentActions
+        {
+            get => BrokkrCommandPolicy.ParseAllowedActions(EditorPrefs.GetString(
+                ProjectKey("AllowedAgentActions"), string.Join(",", BrokkrCommandPolicy.DefaultAllowedActions))).ToArray();
+            set => EditorPrefs.SetString(ProjectKey("AllowedAgentActions"), string.Join(",", value));
+        }
 
         internal static string CultMeshCachePath
         {

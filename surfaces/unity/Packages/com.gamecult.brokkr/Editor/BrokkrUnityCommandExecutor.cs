@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using GameCult.Brokkr;
 using UnityEditor;
@@ -26,6 +27,11 @@ namespace GameCult.Brokkr.Editor
                     "createPrefabVariant" => CreatePrefabVariant(command),
                     "assignMaterial" => AssignMaterial(command),
                     "createScriptableObject" => CreateScriptableObject(command),
+                    "refreshAssets" => RefreshAssets(command),
+                    "setEditorPlayState" => SetEditorPlayState(command),
+                    "setEditorPaused" => SetEditorPaused(command),
+                    "captureEditorView" => CaptureEditorView(command),
+                    "saveScene" => SaveScene(command),
                     _ => Failed(command, $"Unsupported Unity command action: {command.action}")
                 };
             }
@@ -33,6 +39,108 @@ namespace GameCult.Brokkr.Editor
             {
                 return Failed(command, error.Message);
             }
+        }
+
+        private static BrokkrUnityCommandReceipt RefreshAssets(BrokkrUnityCommand command)
+        {
+            AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+            return Accepted(command, "Asset database refreshed.", "");
+        }
+
+        private static BrokkrUnityCommandReceipt SetEditorPlayState(BrokkrUnityCommand command)
+        {
+            if (!bool.TryParse(command.value, out var shouldPlay))
+            {
+                return Failed(command, "Play state value must be true or false.");
+            }
+
+            EditorApplication.isPlaying = shouldPlay;
+            return Accepted(command, shouldPlay ? "Entering Play mode." : "Leaving Play mode.", "");
+        }
+
+        private static BrokkrUnityCommandReceipt SetEditorPaused(BrokkrUnityCommand command)
+        {
+            if (!bool.TryParse(command.value, out var shouldPause))
+            {
+                return Failed(command, "Pause state value must be true or false.");
+            }
+
+            EditorApplication.isPaused = shouldPause;
+            return Accepted(command, shouldPause ? "Editor paused." : "Editor resumed.", "");
+        }
+
+        // Shipped denied by BrokkrCommandPolicy; a project that allows it saves every open scene.
+        private static BrokkrUnityCommandReceipt SaveScene(BrokkrUnityCommand command)
+        {
+            return EditorSceneManager.SaveOpenScenes()
+                ? Accepted(command, "Open scenes saved.", "")
+                : Failed(command, "Saving the open scenes failed.");
+        }
+
+        private static BrokkrUnityCommandReceipt CaptureEditorView(BrokkrUnityCommand command)
+        {
+            var camera = ResolveCaptureCamera(command.viewKind);
+            if (camera == null)
+            {
+                return Failed(command, $"No {command.viewKind} camera is available.");
+            }
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            // The policy admitted this path; the same resolver names the file, so there is no second rule.
+            var outputPath = BrokkrCommandPolicy.ResolveCapturePath(projectRoot, command.outputPath);
+            var directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var width = command.width > 0 ? command.width : Math.Max(camera.pixelWidth, 1);
+            var height = command.height > 0 ? command.height : Math.Max(camera.pixelHeight, 1);
+            var target = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32,
+                RenderTextureReadWrite.sRGB);
+            var previousTarget = camera.targetTexture;
+            var previousActive = RenderTexture.active;
+            try
+            {
+                camera.targetTexture = target;
+                camera.Render();
+                RenderTexture.active = target;
+                var image = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                try
+                {
+                    image.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                    image.Apply(false, false);
+                    File.WriteAllBytes(outputPath, image.EncodeToPNG());
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(image);
+                }
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget;
+                RenderTexture.active = previousActive;
+                RenderTexture.ReleaseTemporary(target);
+            }
+
+            return Accepted(command, $"Captured {command.viewKind} view.", outputPath);
+        }
+
+        private static Camera ResolveCaptureCamera(string viewKind)
+        {
+            if (string.Equals(viewKind, "scene", StringComparison.OrdinalIgnoreCase))
+            {
+                return SceneView.lastActiveSceneView != null ? SceneView.lastActiveSceneView.camera : null;
+            }
+
+            if (string.Equals(viewKind, "game", StringComparison.OrdinalIgnoreCase))
+            {
+                return Camera.main ?? UnityEngine.Object.FindObjectsOfType<Camera>()
+                    .FirstOrDefault(candidate => candidate.enabled);
+            }
+
+            return null;
         }
 
         private static BrokkrUnityCommandReceipt CreateGameObject(BrokkrUnityCommand command)

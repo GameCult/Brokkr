@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -111,12 +112,19 @@ namespace GameCult.Brokkr.Editor
 
         private static void DrainCommands()
         {
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            var policy = new BrokkrCommandPolicy(projectRoot, BrokkrSettings.AllowedAgentActions);
             var drained = false;
             while (MirrorInstance.Ledger.TryNextPending(out var command))
             {
-                var receipt = BrokkrUnityCommandExecutor.Execute(command);
+                // The one call path into the executor, and admission is its precondition.
+                var admission = policy.Decide(command);
+                var receipt = admission.Allowed
+                    ? BrokkrUnityCommandExecutor.Execute(command)
+                    : admission.DeniedReceipt(command);
                 // The receipt answers exactly the id it ran, or the ledger would offer the intent again.
                 receipt.commandId = command.commandId;
+                receipt.requestedBy = command.requestedBy;
                 MirrorInstance.PublishReceiptAsync(receipt).GetAwaiter().GetResult();
                 drained = true;
             }

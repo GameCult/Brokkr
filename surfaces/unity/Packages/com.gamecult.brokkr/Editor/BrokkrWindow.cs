@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using GameCult.Brokkr;
 using UnityEditor;
 using UnityEngine;
@@ -10,6 +11,7 @@ namespace GameCult.Brokkr.Editor
         private string brokerUri = BrokkrSettings.DefaultBrokerUri;
         private string cultMeshCachePath = "";
         private bool autoPublish;
+        private string allowedAgentActions = "";
         private BrokkrHostSnapshot lastSnapshot;
         private BrokkrSyncReceipt lastSyncReceipt;
         private string lastReceipt = "No snapshot published yet.";
@@ -65,6 +67,7 @@ namespace GameCult.Brokkr.Editor
             brokerUri = BrokkrSettings.BrokerUri;
             cultMeshCachePath = BrokkrSettings.CultMeshCachePath;
             autoPublish = BrokkrSettings.AutoPublish;
+            allowedAgentActions = string.Join(",", BrokkrSettings.AllowedAgentActions);
             syncSessionId = BrokkrSettings.SyncSessionId;
             syncDisplayName = BrokkrSettings.SyncDisplayName;
             blenderObjectName = BrokkrSettings.BlenderObjectName;
@@ -126,12 +129,14 @@ namespace GameCult.Brokkr.Editor
                 BrokkrSettings.AgentCommandsEnabled
                     ? (Mirror.IsRunning ? $"executing intents from {Mirror.CachePath}" : "enabled, mirror not running")
                     : "off: no intent written into .brokkr will run");
+            allowedAgentActions = EditorGUILayout.TextField("Allowed Actions", allowedAgentActions);
 
             if (GUILayout.Button("Save Settings"))
             {
                 BrokkrSettings.BrokerUri = brokerUri;
                 BrokkrSettings.CultMeshCachePath = cultMeshCachePath;
                 BrokkrSettings.AutoPublish = autoPublish;
+                BrokkrSettings.AllowedAgentActions = BrokkrCommandPolicy.ParseAllowedActions(allowedAgentActions).ToArray();
                 BrokkrSettings.SyncSessionId = syncSessionId;
                 BrokkrSettings.SyncDisplayName = syncDisplayName;
                 BrokkrSettings.BlenderObjectName = blenderObjectName;

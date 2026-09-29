@@ -42,7 +42,7 @@ public sealed class BrokkrCommandCliTests
             "--target-object-id", "obj-1", "--name", "Widget", "--component-type", "Light", "--property-path", "m_Range",
             "--value", "12", "--asset-path", "Assets/x.prefab", "--parent-object-id", "parent-1",
             "--local-position", "1,2,3", "--local-euler-angles", "4,5,6", "--local-scale", "7,8,9",
-            "--view", "scene", "--output", "artifacts/shot.png", "--width", "640", "--height", "480");
+            "--view", "scene", "--output", "shot.png", "--width", "640", "--height", "480", "--requested-by", "tester");
 
         Assert.Equal(0, exit);
         Assert.Equal("all-fields", output.Trim());
@@ -51,13 +51,13 @@ public sealed class BrokkrCommandCliTests
             new[]
             {
                 "all-fields", "setGameObjectTransform", "obj-1", "Widget", "Light", "m_Range", "12", "Assets/x.prefab",
-                "parent-1", "1,2,3", "4,5,6", "7,8,9", "scene", "artifacts/shot.png"
+                "parent-1", "1,2,3", "4,5,6", "7,8,9", "scene", "shot.png", "tester"
             },
             new[]
             {
                 intent.commandId, intent.action, intent.targetObjectId, intent.name, intent.componentType,
                 intent.propertyPath, intent.value, intent.assetPath, intent.parentObjectId, intent.localPosition,
-                intent.localEulerAngles, intent.localScale, intent.viewKind, intent.outputPath
+                intent.localEulerAngles, intent.localScale, intent.viewKind, intent.outputPath, intent.requestedBy
             });
         Assert.Equal((640, 480), (intent.width, intent.height));
     }
@@ -142,6 +142,7 @@ public sealed class BrokkrCommandCliTests
         Assert.Equal(0, result.Exit);
         Assert.Contains("agent-commands: on", result.Out);
         Assert.Contains("project: probe", result.Out);
+        Assert.Contains("state: playing=False paused=False compiling=False updating=False", result.Out);
     }
 
     [Theory]

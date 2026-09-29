@@ -36,7 +36,8 @@ internal static class Cli
             ["--view"] = (command, value) => command.viewKind = value,
             ["--output"] = (command, value) => command.outputPath = value,
             ["--width"] = (command, value) => command.width = Integer("--width", value),
-            ["--height"] = (command, value) => command.height = Integer("--height", value)
+            ["--height"] = (command, value) => command.height = Integer("--height", value),
+            ["--requested-by"] = (command, value) => command.requestedBy = value
         };
 
     internal static async Task<int> RunAsync(string[] args)
@@ -63,6 +64,7 @@ internal static class Cli
         Console.WriteLine($"observed: {host.observedAt}");
         Console.WriteLine($"scene: {host.activeScenePath}");
         Console.WriteLine($"agent-commands: {(host.agentCommandsEnabled ? "on" : "off")}");
+        Console.WriteLine($"state: playing={host.isPlaying} paused={host.isPaused} compiling={host.isCompiling} updating={host.isUpdating}");
         Console.WriteLine($"objects: {host.sceneObjects.Length}");
         foreach (var sceneObject in host.sceneObjects.OrderBy(item => item.path, StringComparer.Ordinal))
         {

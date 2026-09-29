@@ -23,7 +23,10 @@ namespace GameCult.Brokkr
         [Key(11)] public string[] capabilities = Array.Empty<string>();
         [Key(12)] public BrokkrGameObjectSnapshot[] sceneObjects = Array.Empty<BrokkrGameObjectSnapshot>();
         [Key(13)] public BrokkrAssetSnapshot[] assets = Array.Empty<BrokkrAssetSnapshot>();
-        // Keys 14-17 are reserved for the editor play-state fields (A4).
+        [Key(14)] public bool isPlaying;
+        [Key(15)] public bool isPaused;
+        [Key(16)] public bool isCompiling;
+        [Key(17)] public bool isUpdating;
         // False means the editor executes no agent commands: the operator has not enabled the sink.
         [Key(18)] public bool agentCommandsEnabled;
     }
@@ -112,11 +115,13 @@ namespace GameCult.Brokkr
         [Key(10)] public string localPosition = "";
         [Key(11)] public string localEulerAngles = "";
         [Key(12)] public string localScale = "";
-        // Editor view capture (A4): viewKind is scene or game; outputPath is relative to the project root.
+        // Editor view capture: viewKind is scene or game; outputPath is relative to .brokkr/captures (BrokkrCommandPolicy).
         [Key(13)] public string viewKind = "";
         [Key(14)] public string outputPath = "";
         [Key(15)] public int width;
         [Key(16)] public int height;
+        // Who asked: a caller's name for itself, echoed on the receipt. Informational; admission never reads it.
+        [Key(17)] public string requestedBy = "";
     }
 
     [MessagePackObject]
@@ -137,5 +142,6 @@ namespace GameCult.Brokkr
         [Key(3)] public string message = "";
         [Key(4)] public string objectId = "";
         [Key(5)] public string observedAt = "";
+        [Key(6)] public string requestedBy = "";
     }
 }

@@ -142,6 +142,11 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 - `createPrefabVariant`
 - `assignMaterial`
 - `createScriptableObject`
+- `refreshAssets`
+- `setEditorPlayState`
+- `setEditorPaused`
+- `captureEditorView`
+- `saveScene`
 
 Unity owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Unity executes recognized intents and publishes
@@ -157,6 +162,25 @@ optional instance name, and `parentObjectId` as the optional parent.
 destination prefab path.
 `createScriptableObject` uses `componentType` as the ScriptableObject type and
 `assetPath` as the destination asset path.
+`refreshAssets` forces an AssetDatabase refresh. `setEditorPlayState` and
+`setEditorPaused` take boolean `value`; the editor service restarts from
+`[InitializeOnLoad]` after the resulting domain reload and keeps draining.
+`captureEditorView` renders `viewKind` (`scene` or `game`) to a PNG at `width`
+by `height` (0 means the camera size, at most 8192). `outputPath` is a plain
+relative path ending in `.png`, resolved under `<project>/.brokkr/captures/`;
+anything else is denied. `saveScene` saves the open scenes.
+
+### Admission
+
+Before any intent runs, `BrokkrCommandPolicy` checks it against the project's
+allowed-action list (window field "Allowed Actions", per project). By default
+scene mutation and editor lifecycle actions are allowed; the asset-writing
+actions `createScriptableObject` and `createPrefabVariant`, and `saveScene`,
+are not, and an action the list does not name is denied. A denied intent gets a
+receipt with `status: denied` and the reason in `message`, so a refusal is as
+visible as an acceptance. `requestedBy` on the intent names the caller and is
+echoed on the receipt; admission never reads it. The window's buttons write
+intents like any other caller, so the operator and an agent pass the same gate.
 
 ## Unity Command Transport
 
