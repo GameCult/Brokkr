@@ -106,17 +106,36 @@ dotnet run --project F:/Projects/Brokkr/brokkr-command/Brokkr.Command.csproj -- 
 dotnet run --project F:/Projects/Brokkr/brokkr-command/Brokkr.Command.csproj -- --unity-cache <project>/.brokkr/unity-editor.ccmp --action createGameObject --name Marker
 ```
 
-An intent stored before the flag was last turned on never runs: it gets a
-receipt with `status: expired`, so turning the sink on cannot execute anything
-you did not see. The host snapshot's `agentCommandsEnabledAt` is that instant.
+Turning `Agent Commands` on expires every intent already in `.brokkr/`: each
+gets a receipt with `status: expired` and none runs, so enabling the sink
+cannot execute anything you did not see. Intents that arrive after the tick are
+fresh, whatever clock wrote them. With about 2000 waiting intents the tick
+takes several seconds (the store writes one receipt each); after that the editor
+handles at most 16 intents per update tick.
+
+The tick also writes an enable marker into `.brokkr/unity-editor.ccmp`, and the
+editor keeps the matching token in its own preferences. The sink runs only
+while the store carries that marker. If you re-clone the project, or copy a
+`.brokkr/` folder in, the marker is missing or foreign, so the editor turns the
+sink off and logs why; tick `Agent Commands` again to run intents from that
+store.
 
 Before the editor runs an intent it writes a receipt with `status: attempted`.
 If the editor stops, or cannot record the result, that intent is reported as
-`interrupted` and is not run again; check the project and send a new intent if
-it should run. One editor tick handles at most 16 intents, expired and denied
-ones included; the rest wait for the next tick. Receipts are never pruned.
+`interrupted` and is not run again automatically. Check the project first:
+`interrupted` does not say whether the action happened, and some actions are
+not idempotent. Re-sending `createGameObject` after an `interrupted` receipt
+can create the object twice; a domain reload during `refreshAssets` can also
+end as `interrupted` although the refresh completed. If the editor could not
+even write the `attempted` receipt, the intent never started and is retried on
+the next tick.
+
+Receipts are kept for the newest 1000 answered intents; older intents are
+deleted together with their receipts, at most 128 per tick.
 
 `brokkr-command` exits 0 when the receipt is `accepted`, 1 for any other
 receipt status (`failed`, `denied`, `expired`, `interrupted`), and 2 for bad
 usage, a timeout, a store that cannot be opened, or any other failure. A
-`--command-id` that already has a receipt is refused with exit 2.
+`--command-id` that already has a receipt is refused with exit 2; the check and
+the write are two steps, so two callers naming the same new id in the same
+instant can still collide.
