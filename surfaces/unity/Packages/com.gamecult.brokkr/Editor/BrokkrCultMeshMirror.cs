@@ -87,24 +87,43 @@ namespace GameCult.Brokkr.Editor
             return node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
         }
 
-        public Task PutSinkEnabledAsync(BrokkrSinkEnabled marker)
-        {
-            RequireRunning();
-            return node.Database.PutAsync(BrokkrCommandLedger.SinkKey, marker);
-        }
-
-        public Task DeleteIntentAsync(string commandId)
-        {
-            RequireRunning();
-            return node.Database.DeleteAsync<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey(commandId));
-        }
-
         public Task DeleteReceiptAsync(string commandId)
         {
             RequireRunning();
             return node.Database.DeleteAsync<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(commandId));
         }
 
+        // The batch methods commit through the cache directly. Database.PutAsync appends a mutation-log entry per
+        // record, which is what made 2000 expiries cost seconds; nothing here is replicated (no listener), and the
+        // ledger and the CLI both read the cache and the store.
+        public Task CommitEnableAsync(BrokkrUnityCommandReceipt[] expired, BrokkrSinkEnabled marker)
+        {
+            RequireRunning();
+            var committed = node.Cache.Commit(batch =>
+            {
+                foreach (var receipt in expired)
+                {
+                    batch.Upsert(receipt, new CultRecordHandle<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(receipt.commandId)));
+                }
+
+                batch.Upsert(marker, new CultRecordHandle<BrokkrSinkEnabled>(BrokkrCommandLedger.SinkKey));
+            });
+            return committed ? Task.CompletedTask : Task.FromException(new InvalidOperationException("The enable commit was refused."));
+        }
+
+        public Task DeleteAnsweredAsync(string[] commandIds)
+        {
+            RequireRunning();
+            var committed = node.Cache.Commit(batch =>
+            {
+                foreach (var commandId in commandIds)
+                {
+                    batch.Remove(BrokkrCommandLedger.CommandKey(commandId));
+                    batch.Remove(BrokkrCommandLedger.ReceiptKey(commandId));
+                }
+            });
+            return committed ? Task.CompletedTask : Task.FromException(new InvalidOperationException("The prune commit was refused."));
+        }
         public Task FlushAsync()
         {
             RequireRunning();

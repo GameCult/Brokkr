@@ -5,13 +5,17 @@ using System.Threading.Tasks;
 namespace GameCult.Brokkr
 {
     // What the drain writes through. BrokkrCultMeshMirror is the editor's implementation and the scenario harness
-    // has its own; puts and deletes only stage, and FlushAsync makes them durable (an fsync, so batches share one).
+    // has its own. Writes only stage and FlushAsync makes them durable (an fsync), so anything that must land
+    // together goes through one of the two batch methods, each a single atomic commit: the cost of a write is per
+    // commit, not per record.
     public interface IBrokkrCommandStore
     {
         Task PutReceiptAsync(BrokkrUnityCommandReceipt receipt);
-        Task PutSinkEnabledAsync(BrokkrSinkEnabled marker);
-        Task DeleteIntentAsync(string commandId);
         Task DeleteReceiptAsync(string commandId);
+        // Every expiry receipt and the enable marker, or none of them.
+        Task CommitEnableAsync(BrokkrUnityCommandReceipt[] expired, BrokkrSinkEnabled marker);
+        // Each intent with its receipt, or none of them.
+        Task DeleteAnsweredAsync(string[] commandIds);
         Task FlushAsync();
     }
 
@@ -78,14 +82,16 @@ namespace GameCult.Brokkr
             }
 
             var waiting = ledger.Pending(int.MaxValue);
-            foreach (var command in waiting)
+            var expired = new BrokkrUnityCommandReceipt[waiting.Length];
+            for (var index = 0; index < waiting.Length; index++)
             {
-                await store.PutReceiptAsync(Receipt(command, ExpiredStatus,
+                expired[index] = Receipt(waiting[index], ExpiredStatus,
                     "This intent was already in the store when the operator enabled the command sink, so the "
-                    + "operator never saw it. It was not run."));
+                    + "operator never saw it. It was not run.");
             }
 
-            await store.PutSinkEnabledAsync(new BrokkrSinkEnabled { token = token, enabledAt = DateTime.UtcNow.ToString("O") });
+            await store.CommitEnableAsync(
+                expired, new BrokkrSinkEnabled { token = token, enabledAt = DateTime.UtcNow.ToString("O") });
             await store.FlushAsync();
             return waiting.Length;
         }
@@ -137,17 +143,11 @@ namespace GameCult.Brokkr
                 await store.FlushAsync();
             }
 
+            // One commit takes each intent with its receipt: an intent without its receipt would run again.
             var pruned = ledger.Prunable(RetainedReceipts, MaxPrunedPerTick);
-            foreach (var commandId in pruned)
-            {
-                // The intent goes first: a receipt without its intent is harmless, an intent without its receipt
-                // would run again.
-                await store.DeleteIntentAsync(commandId);
-                await store.DeleteReceiptAsync(commandId);
-            }
-
             if (pruned.Length > 0)
             {
+                await store.DeleteAnsweredAsync(pruned);
                 await store.FlushAsync();
             }
 

@@ -131,14 +131,32 @@ internal sealed class EditorProbe : IDisposable, IBrokkrCommandStore
         return node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
     }
 
-    public Task PutSinkEnabledAsync(BrokkrSinkEnabled marker) => node.Database.PutAsync(BrokkrCommandLedger.SinkKey, marker);
-
-    public Task DeleteIntentAsync(string commandId) =>
-        node.Database.DeleteAsync<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey(commandId));
-
     public Task DeleteReceiptAsync(string commandId) =>
         node.Database.DeleteAsync<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(commandId));
 
+    public Task CommitEnableAsync(BrokkrUnityCommandReceipt[] expired, BrokkrSinkEnabled marker)
+    {
+        Assert.True(node.Cache.Commit(batch =>
+        {
+            foreach (var receipt in expired)
+                batch.Upsert(receipt, new CultRecordHandle<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(receipt.commandId)));
+            batch.Upsert(marker, new CultRecordHandle<BrokkrSinkEnabled>(BrokkrCommandLedger.SinkKey));
+        }));
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAnsweredAsync(string[] commandIds)
+    {
+        Assert.True(node.Cache.Commit(batch =>
+        {
+            foreach (var commandId in commandIds)
+            {
+                batch.Remove(BrokkrCommandLedger.CommandKey(commandId));
+                batch.Remove(BrokkrCommandLedger.ReceiptKey(commandId));
+            }
+        }));
+        return Task.CompletedTask;
+    }
     public Task FlushAsync()
     {
         if (FailFlush?.Invoke() == true)
