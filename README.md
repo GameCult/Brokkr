@@ -32,8 +32,8 @@ broker.
 - `surfaces/blender/brokkr_bridge`: Blender add-on target backed by
   CultLib's Python CultMesh node/server, with optional debug export/import
   probes.
-- `brokkr-daemon`: Rust daemon skeleton that emits Brokkr's provider
-  advertisement and command policy.
+- `brokkr-daemon`: Rust CLI that emits Brokkr's provider advertisement and
+  command policy and runs the Unity/Blender sync pass.
 
 ## First Smoke
 
@@ -55,17 +55,26 @@ timeline bindings, and receipts. Unity and Blender editor plugins publish those
 documents through CultMesh so a daemon sync loop can translate them into
 host-owned command intents without stealing scene truth.
 
-## Unity Smoke
+## Commands
 
-```powershell
-cargo run -p brokkr-daemon -- serve
-```
+`brokkr-daemon` is a command-line tool over cache files, not a running service.
+It has four subcommands:
 
-Add the Unity package by local path:
+- `provider` (alias `smoke`): print the provider advertisement.
+- `sync-contract`: print the sync contract.
+- `sync-once --unity-cache PATH --blender-cache PATH [--dry-run]`: run one sync
+  pass between the two editor caches.
+- `sync-loop --unity-cache PATH --blender-cache PATH [--interval-ms N]
+  [--max-passes N] [--dry-run]`: repeat the sync pass.
+
+## Unity Install
+
+Add the Unity package by local path, alongside `org.gamecult.cultlib` (see
+`surfaces/unity/README.md`):
 
 ```json
-"com.gamecult.brokkr": "file:E:/Projects/Brokkr/surfaces/unity/Packages/com.gamecult.brokkr"
+"com.gamecult.brokkr": "file:F:/Projects/Brokkr/surfaces/unity/Packages/com.gamecult.brokkr"
 ```
 
-Then open `GameCult > Brokkr` in Unity and publish a snapshot to the local
-daemon.
+Then open `GameCult > Brokkr` in Unity. The window mirrors editor state to a
+CultMesh cache file in the project.
