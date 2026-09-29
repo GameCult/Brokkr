@@ -23,6 +23,9 @@ namespace GameCult.Brokkr
         [Key(11)] public string[] capabilities = Array.Empty<string>();
         [Key(12)] public BrokkrGameObjectSnapshot[] sceneObjects = Array.Empty<BrokkrGameObjectSnapshot>();
         [Key(13)] public BrokkrAssetSnapshot[] assets = Array.Empty<BrokkrAssetSnapshot>();
+        // Keys 14-17 are reserved for the editor play-state fields (A4).
+        // False means the editor executes no agent commands: the operator has not enabled the sink.
+        [Key(18)] public bool agentCommandsEnabled;
     }
 
     [CultDocument("brokkr.unity.snapshot_receipt", "brokkr.unity.snapshot_receipt.v0")]
