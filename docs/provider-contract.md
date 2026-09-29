@@ -150,6 +150,25 @@ destination prefab path.
 `createScriptableObject` uses `componentType` as the ScriptableObject type and
 `assetPath` as the destination asset path.
 
+## Unity Command Transport
+
+Commands reach the editor through the project's directory store at
+`<project>/.brokkr/unity-editor.ccmp` (`.records/` beside it). There is no
+network listener: admission starts at filesystem permissions, and the editor sees
+a written intent on its next pull, about once a second.
+
+The editor executes intents only while the operator has enabled agent commands
+for that project (window toggle "Agent Commands"). The flag is off by default
+and installing the package never turns it on. The host snapshot carries it as
+`agentCommandsEnabled`, so a caller can see why nothing executes.
+
+A command id is single-use. Every writer mints a fresh `commandId` for each
+act, and a receipt at `unity/receipts/{commandId}` answers exactly that id.
+Once an id has a receipt, the editor never executes it again, whatever is
+later written under it: reusing an answered id is a caller defect, and its
+receipt is the answer that stands. A writer that repeats an intent mints a new
+id for each repetition.
+
 ## Blender Command Actions
 
 All Blender writes use `brokkr.blender.command_intent.v0` and receive

@@ -46,6 +46,40 @@ public sealed class BrokkrCommandLedgerTests
     }
 
     [Fact]
+    public async Task RewrittenCommandIdIsNotReExecuted()
+    {
+        // Command ids are single-use: a receipt retires the id, and a later intent written under it is a caller
+        // defect that the editor ignores. Callers that mean a new act mint a new id.
+        using var project = new ScratchProject();
+        await project.WriteCommandAsync("reused", "refreshAssets");
+        using var editor = project.OpenCache();
+        var ledger = new BrokkrCommandLedger(editor);
+        Assert.True(ledger.TryNextPending(out _));
+        await Answer(editor, "reused");
+
+        await project.WriteCommandAsync("reused", "setEditorPaused");
+        await ledger.PullAsync();
+
+        Assert.False(ledger.TryNextPending(out _));
+    }
+
+    [Fact]
+    public async Task FreshIdAfterAnAnsweredOneIsPending()
+    {
+        using var project = new ScratchProject();
+        await project.WriteCommandAsync("first");
+        using var editor = project.OpenCache();
+        var ledger = new BrokkrCommandLedger(editor);
+        await Answer(editor, "first");
+
+        await project.WriteCommandAsync("second", "setEditorPaused");
+        await ledger.PullAsync();
+
+        Assert.True(ledger.TryNextPending(out var pending));
+        Assert.Equal("second", pending.commandId);
+    }
+
+    [Fact]
     public async Task ReceiptWrittenByAnotherProcessRetiresTheCommand()
     {
         using var project = new ScratchProject();
