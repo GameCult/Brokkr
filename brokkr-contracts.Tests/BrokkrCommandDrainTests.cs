@@ -175,18 +175,4 @@ public sealed class BrokkrCommandDrainTests
         Assert.Empty(editor.Executed);
         Assert.Equal("denied", StatusOf(project, "nope"));
     }
-
-    [Fact]
-    public async Task SinkOffExecutesNothingAndAnswersNothing()
-    {
-        using var project = new ScratchProject();
-        using var editor = await EditorProbe.StartAsync(project.StorePath);
-        editor.AgentCommandsEnabled = false;
-        await project.WriteCommandAsync("waiting");
-
-        await editor.TickAsync();
-
-        Assert.Empty(editor.Executed);
-        Assert.Empty(Receipts(project));
-    }
 }

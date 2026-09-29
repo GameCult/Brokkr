@@ -300,4 +300,16 @@ public sealed class BrokkrCommandCliTests
         Assert.StartsWith("interrupted:", result.Out);
         Assert.Single(editor.Executed);
     }
+
+    [Fact]
+    public async Task AnUnexpectedFailureExitsTwoInsteadOfAborting()
+    {
+        using var project = new ScratchProject();
+        // Past the file-name limit, so the store fails while writing, after it opened cleanly.
+        var result = await RunAsync(
+            "--unity-cache", project.StorePath, "--action", "refreshAssets", "--command-id", new string('x', 400), "--wait-ms", "0");
+
+        Assert.Equal(2, result.Exit);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+    }
 }
