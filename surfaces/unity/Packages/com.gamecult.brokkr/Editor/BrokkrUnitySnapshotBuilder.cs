@@ -41,6 +41,7 @@ namespace GameCult.Brokkr.Editor
                     .Select(item => item.name)
                     .ToArray(),
                 assetCount = AssetDatabase.GetAllAssetPaths().Length,
+                agentCommandsEnabled = BrokkrSettings.AgentCommandsEnabled,
                 capabilities = Capabilities,
                 sceneObjects = CaptureSceneObjects(),
                 assets = CaptureAssets()

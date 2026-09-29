@@ -3,24 +3,25 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using GameCult.Caching;
+using GameCult.Caching.MessagePack;
 using GameCult.Mesh;
 using GameCult.Networking;
 using R3;
-using UnityEditor;
 using UnityEngine;
 
 namespace GameCult.Brokkr.Editor
 {
+    // The one open handle on the project's directory store. BrokkrEditorService owns the only instance; the window
+    // publishes through it and never opens the store itself.
     internal sealed class BrokkrCultMeshMirror : IDisposable
     {
-        private readonly Queue<BrokkrUnityCommand> commandQueue = new();
         private readonly Queue<BrokkrSyncReceipt> syncReceiptQueue = new();
         private CultMeshNode node;
-        private IDisposable commandSubscription;
         private IDisposable syncReceiptSubscription;
 
         internal bool IsRunning => node != null;
         internal string CachePath { get; private set; } = "";
+        internal BrokkrCommandLedger Ledger { get; private set; }
 
         internal async Task StartAsync(string cachePath)
         {
@@ -32,24 +33,23 @@ namespace GameCult.Brokkr.Editor
             CachePath = cachePath;
             Directory.CreateDirectory(Path.GetDirectoryName(cachePath) ?? ".");
 
-            node = await CultMesh.StartNodeAsync(cachePath, new CultMeshNodeOptions
+            // File transport: no listener, no endpoint. Other processes reach the editor through the store and are
+            // seen on the next pull.
+            node = await CultMesh.CreateNodeAsync(cachePath, new CultMeshNodeOptions
             {
+                StartServer = false,
+                CacheOptions = new CultCacheOpenOptions
+                {
+                    UseDirectoryStore = true
+                },
                 EnableDurableShardLogs = true,
                 DatabaseOptions = new CultNetDatabaseOptions
                 {
                     RuntimeId = "brokkr-unity-editor"
                 }
             });
+            Ledger = new BrokkrCommandLedger(node.Cache);
 
-            commandSubscription = node.Database
-                .Watch<BrokkrUnityCommand>()
-                .Subscribe(change =>
-                {
-                    if (change.Document != null)
-                    {
-                        commandQueue.Enqueue(change.Document);
-                    }
-                });
             syncReceiptSubscription = node.Database
                 .Watch<BrokkrSyncReceipt>()
                 .Subscribe(change =>
@@ -61,6 +61,12 @@ namespace GameCult.Brokkr.Editor
                 });
         }
 
+        internal async Task PullExternalUpdatesAsync()
+        {
+            RequireRunning();
+            await Ledger.PullAsync();
+        }
+
         internal async Task PublishSnapshotAsync(BrokkrHostSnapshot snapshot)
         {
             RequireRunning();
@@ -68,24 +74,29 @@ namespace GameCult.Brokkr.Editor
             await node.FlushAsync(soft: true);
         }
 
+        // The receipt is the only proof an intent ran, and it is keyed by the intent it answers.
         internal async Task PublishReceiptAsync(BrokkrUnityCommandReceipt receipt)
         {
             RequireRunning();
-            var key = string.IsNullOrWhiteSpace(receipt.commandId)
-                ? $"unity/receipts/{Guid.NewGuid():N}"
-                : $"unity/receipts/{receipt.commandId}";
-            await node.Database.PutAsync(new CultRecordKey(key), receipt);
+            if (string.IsNullOrWhiteSpace(receipt.commandId))
+            {
+                throw new ArgumentException("A receipt must name the command it answers.", nameof(receipt));
+            }
+
+            await node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
             await node.FlushAsync(soft: true);
         }
 
+        // Command ids are single-use: a caller with no id gets a fresh one, and reusing an answered id is a defect.
         internal async Task PublishCommandAsync(BrokkrUnityCommand command)
         {
             RequireRunning();
-            var commandId = string.IsNullOrWhiteSpace(command.commandId)
-                ? Guid.NewGuid().ToString("N")
-                : command.commandId;
-            command.commandId = commandId;
-            await node.Database.PutAsync(new CultRecordKey($"unity/commands/{commandId}"), command);
+            if (string.IsNullOrWhiteSpace(command.commandId))
+            {
+                command.commandId = Guid.NewGuid().ToString("N");
+            }
+
+            await node.Database.PutAsync(BrokkrCommandLedger.CommandKey(command.commandId), command);
             await node.FlushAsync(soft: true);
         }
 
@@ -124,18 +135,6 @@ namespace GameCult.Brokkr.Editor
             await node.FlushAsync(soft: true);
         }
 
-        internal bool TryDequeueCommand(out BrokkrUnityCommand command)
-        {
-            if (commandQueue.Count > 0)
-            {
-                command = commandQueue.Dequeue();
-                return true;
-            }
-
-            command = null;
-            return false;
-        }
-
         internal bool TryDequeueSyncReceipt(out BrokkrSyncReceipt receipt)
         {
             if (syncReceiptQueue.Count > 0)
@@ -164,12 +163,11 @@ namespace GameCult.Brokkr.Editor
 
         public void Dispose()
         {
-            commandSubscription?.Dispose();
-            commandSubscription = null;
             syncReceiptSubscription?.Dispose();
             syncReceiptSubscription = null;
             node?.Dispose();
             node = null;
+            Ledger = null;
         }
     }
 }

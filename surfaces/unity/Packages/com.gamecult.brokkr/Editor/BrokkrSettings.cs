@@ -1,4 +1,5 @@
 using UnityEditor;
+using UnityEngine;
 
 namespace GameCult.Brokkr.Editor
 {
@@ -20,16 +21,20 @@ namespace GameCult.Brokkr.Editor
             set => EditorPrefs.SetBool("GameCult.Brokkr.AutoPublish", value);
         }
 
-        internal static bool AutoPollCommands
+        // Whether this editor executes intents that agents write into .brokkr. Off until the operator turns it on.
+        // EditorPrefs is shared by every project on the machine, so the store path and the flag both key on the project.
+        internal static bool AgentCommandsEnabled
         {
-            get => EditorPrefs.GetBool("GameCult.Brokkr.AutoPollCommands", false);
-            set => EditorPrefs.SetBool("GameCult.Brokkr.AutoPollCommands", value);
+            get => EditorPrefs.GetBool(ProjectKey("AgentCommandsEnabled"), false);
+            set => EditorPrefs.SetBool(ProjectKey("AgentCommandsEnabled"), value);
         }
+
+        private static string ProjectKey(string name) => $"GameCult.Brokkr.{name}.{Application.dataPath}";
 
         internal static string CultMeshCachePath
         {
-            get => EditorPrefs.GetString("GameCult.Brokkr.CultMeshCachePath", BrokkrCultMeshMirror.DefaultCachePath());
-            set => EditorPrefs.SetString("GameCult.Brokkr.CultMeshCachePath", value);
+            get => EditorPrefs.GetString(ProjectKey("CultMeshCachePath"), BrokkrCultMeshMirror.DefaultCachePath());
+            set => EditorPrefs.SetString(ProjectKey("CultMeshCachePath"), value);
         }
 
         internal static string SyncSessionId
