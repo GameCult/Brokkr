@@ -73,7 +73,7 @@ internal static class Cli
         catch (Exception error) when (error is not ArgumentException)
         {
             throw new InvalidOperationException(
-                $"Brokkr store '{cachePath}' is unreadable ({error.GetType().Name}: {error.Message}). It must be a directory store written by the Brokkr editor service.",
+                $"Brokkr store '{cachePath}' cannot be opened ({error.GetType().Name}: {error.Message}). An empty or legacy single-file store, or one another process holds, fails here; it must be a directory store.",
                 error);
         }
     }

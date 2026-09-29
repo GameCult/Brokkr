@@ -235,7 +235,7 @@ public sealed class BrokkrCommandCliTests
     [Theory]
     [InlineData("empty")]
     [InlineData("legacy")]
-    public async Task UnreadableStoreExitsTwoWithAMessageThatNamesIt(string kind)
+    public async Task UnopenableStoreExitsTwoWithAMessageThatNamesIt(string kind)
     {
         using var project = new ScratchProject();
         Directory.CreateDirectory(Path.GetDirectoryName(project.StorePath)!);
@@ -246,10 +246,10 @@ public sealed class BrokkrCommandCliTests
         var read = await RunAsync("--unity-cache", project.StorePath, "--action", "readHost");
 
         Assert.Equal(2, write.Exit);
-        Assert.Contains("unreadable", write.Error);
+        Assert.Contains("cannot be opened", write.Error);
         Assert.Contains(project.StorePath, write.Error);
         Assert.Equal(2, read.Exit);
-        Assert.Contains("unreadable", read.Error);
+        Assert.Contains("cannot be opened", read.Error);
     }
 
     [Fact]
@@ -302,19 +302,19 @@ public sealed class BrokkrCommandCliTests
     }
 
     [Fact]
-    public async Task AnUnexpectedFailureExitsTwoInsteadOfAborting()
+    public async Task AFailureAfterTheStoreOpenedExitsTwoInsteadOfAborting()
     {
+        // The store opens cleanly, the intent is written, and the CLI is polling for a receipt when the store is
+        // replaced by garbage. That surfaces as whatever the decoder throws, outside the open's own handling.
         using var project = new ScratchProject();
-        await project.WriteCommandAsync("seed");
-        // The store opens cleanly and then cannot be committed to: a directory sits where the commit lock file goes.
-        var records = project.StorePath + ".records";
-        var lockFile = Path.Combine(records, ".commit.lock");
-        File.Delete(lockFile);
-        Directory.CreateDirectory(lockFile);
+        var cli = RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", "8000");
+        await Task.Delay(3000);
+        File.WriteAllBytes(project.StorePath, Array.Empty<byte>());
 
-        var result = await RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", "0");
+        var result = await cli;
 
         Assert.Equal(2, result.Exit);
+        Assert.DoesNotContain("Timed out", result.Error);
         Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 }
