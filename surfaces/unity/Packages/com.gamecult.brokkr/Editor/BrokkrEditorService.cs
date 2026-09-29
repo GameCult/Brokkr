@@ -61,12 +61,28 @@ namespace GameCult.Brokkr.Editor
             }
         }
 
+        // The operator's toggle. Enabling expires every intent already in the store and writes the enable marker in
+        // one flush (BrokkrCommandDrain.EnableAsync); only then does the editor remember the token, so a failure
+        // leaves the sink off.
         internal static async Task SetAgentCommandsEnabledAsync(bool enabled)
         {
-            BrokkrSettings.AgentCommandsEnabled = enabled;
             if (enabled)
             {
                 await StartAsync();
+                if (!MirrorInstance.IsRunning)
+                {
+                    throw new InvalidOperationException("The Brokkr mirror did not start; the sink stays off.");
+                }
+
+                await MirrorInstance.PullExternalUpdatesAsync();
+                var token = Guid.NewGuid().ToString("N");
+                var expired = await NewDrain().EnableAsync(token);
+                BrokkrSettings.EnableAgentCommands(token);
+                Debug.Log($"Brokkr command sink enabled; {expired} waiting intent(s) expired unrun.");
+            }
+            else
+            {
+                BrokkrSettings.DisableAgentCommands();
             }
 
             // The snapshot carries the flag, so a caller can see why nothing executes.
@@ -100,8 +116,8 @@ namespace GameCult.Brokkr.Editor
                 LastSyncReceipt = syncReceipt;
             }
 
-            var enabledSince = BrokkrSettings.AgentCommandsEnabledSince;
-            if (enabledSince == null || EditorApplication.timeSinceStartup < nextPullAt)
+            var token = BrokkrSettings.AgentCommandsToken;
+            if (token.Length == 0 || EditorApplication.timeSinceStartup < nextPullAt)
             {
                 return;
             }
@@ -110,7 +126,20 @@ namespace GameCult.Brokkr.Editor
             try
             {
                 MirrorInstance.PullExternalUpdatesAsync().GetAwaiter().GetResult();
-                DrainCommands(enabledSince.Value);
+                var handled = NewDrain().DrainAsync(token).GetAwaiter().GetResult();
+                if (handled == BrokkrCommandDrain.NotAuthorized)
+                {
+                    // The store in front of us was not enabled by this editor (re-clone, copied .brokkr, replaced
+                    // store). The stale token authorizes nothing: drop it and make the operator enable again.
+                    BrokkrSettings.DisableAgentCommands();
+                    Debug.LogWarning("Brokkr command sink turned off: this project's store carries no enable marker "
+                                     + "from this editor. Enable Agent Commands again to run intents from it.");
+                    PublishSnapshotAsync().GetAwaiter().GetResult();
+                }
+                else if (handled > 0)
+                {
+                    PublishSnapshotAsync().GetAwaiter().GetResult();
+                }
             }
             catch (Exception error)
             {
@@ -119,19 +148,15 @@ namespace GameCult.Brokkr.Editor
         }
 
         // Every rule about whether and when an intent runs lives in BrokkrCommandDrain; this only supplies the
-        // executor and the receipt writer.
-        private static void DrainCommands(DateTimeOffset enabledSince)
+        // executor and the store.
+        private static BrokkrCommandDrain NewDrain()
         {
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
-            var drain = new BrokkrCommandDrain(
+            return new BrokkrCommandDrain(
                 MirrorInstance.Ledger,
                 new BrokkrCommandPolicy(projectRoot, BrokkrSettings.AllowedAgentActions),
                 BrokkrUnityCommandExecutor.Execute,
-                MirrorInstance.PublishReceiptAsync);
-            if (drain.DrainAsync(enabledSince).GetAwaiter().GetResult() > 0)
-            {
-                PublishSnapshotAsync().GetAwaiter().GetResult();
-            }
+                MirrorInstance);
         }
     }
 }

@@ -107,7 +107,7 @@ internal static class Cli
     {
         // A command id is single-use, so every invocation is a new act with a new id. --command-id exists for callers
         // that need to name their own; one that already has a receipt is refused, because that receipt answered an
-        // earlier act and would be reported as the answer to this one.
+        // earlier act and would be reported as the answer to this one. The check and the write are two steps, so two\n        // callers naming the same new id in the same instant can still collide; ids are minted, and that is a caller defect.
         var named = options.TryGetValue("--command-id", out var commandId) && !string.IsNullOrWhiteSpace(commandId);
         if (named)
         {
@@ -167,7 +167,7 @@ internal static class Cli
         if (started)
             why = " The editor started this intent and has not recorded a result; it will not run it again.";
         throw new TimeoutException(
-            $"Timed out waiting for Brokkr receipt '{receiptKey.Value}'; the intent stays written.{why}");
+            $"Timed out waiting for Brokkr receipt '{receiptKey.Value}'; the intent is still in the store: a running editor with the sink on will run it, but if the operator enables the sink after now it expires unrun.{why}");
     }
 
     private static BrokkrHostSnapshot? ReadHostSnapshot(CultCache cache) =>

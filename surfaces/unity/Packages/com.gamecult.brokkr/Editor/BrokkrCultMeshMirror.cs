@@ -12,8 +12,9 @@ using UnityEngine;
 namespace GameCult.Brokkr.Editor
 {
     // The one open handle on the project's directory store. BrokkrEditorService owns the only instance; the window
-    // publishes through it and never opens the store itself.
-    internal sealed class BrokkrCultMeshMirror : IDisposable
+    // publishes through it and never opens the store itself. It is also the drain's IBrokkrCommandStore: puts and
+    // deletes stage, and FlushAsync is the only fsync.
+    internal sealed class BrokkrCultMeshMirror : IDisposable, IBrokkrCommandStore
     {
         private readonly Queue<BrokkrSyncReceipt> syncReceiptQueue = new();
         private CultMeshNode node;
@@ -75,7 +76,7 @@ namespace GameCult.Brokkr.Editor
         }
 
         // The receipt is the only proof an intent ran, and it is keyed by the intent it answers.
-        internal async Task PublishReceiptAsync(BrokkrUnityCommandReceipt receipt)
+        public Task PutReceiptAsync(BrokkrUnityCommandReceipt receipt)
         {
             RequireRunning();
             if (string.IsNullOrWhiteSpace(receipt.commandId))
@@ -83,10 +84,32 @@ namespace GameCult.Brokkr.Editor
                 throw new ArgumentException("A receipt must name the command it answers.", nameof(receipt));
             }
 
-            await node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
-            await node.FlushAsync(soft: true);
+            return node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
         }
 
+        public Task PutSinkEnabledAsync(BrokkrSinkEnabled marker)
+        {
+            RequireRunning();
+            return node.Database.PutAsync(BrokkrCommandLedger.SinkKey, marker);
+        }
+
+        public Task DeleteIntentAsync(string commandId)
+        {
+            RequireRunning();
+            return node.Database.DeleteAsync<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey(commandId));
+        }
+
+        public Task DeleteReceiptAsync(string commandId)
+        {
+            RequireRunning();
+            return node.Database.DeleteAsync<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(commandId));
+        }
+
+        public Task FlushAsync()
+        {
+            RequireRunning();
+            return node.FlushAsync(soft: true);
+        }
         // Command ids are single-use: a caller with no id gets a fresh one, and reusing an answered id is a defect.
         internal async Task PublishCommandAsync(BrokkrUnityCommand command)
         {

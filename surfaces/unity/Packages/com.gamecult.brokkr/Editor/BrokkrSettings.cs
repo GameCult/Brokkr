@@ -1,5 +1,3 @@
-using System;
-using System.Globalization;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -25,45 +23,19 @@ namespace GameCult.Brokkr.Editor
         }
 
         // Whether this editor executes intents that agents write into .brokkr. Off until the operator turns it on.
-        // EditorPrefs is shared by every project on the machine, so the store path and the flag both key on the project.
-        // Turning it on stamps the enable epoch; intents stored before that instant never run (BrokkrCommandDrain).
-        internal static bool AgentCommandsEnabled
-        {
-            get => EditorPrefs.GetBool(ProjectKey("AgentCommandsEnabled"), false);
-            set
-            {
-                if (value && !AgentCommandsEnabled)
-                {
-                    EditorPrefs.SetString(ProjectKey("AgentCommandsEnabledAt"), DateTimeOffset.UtcNow.ToString("O"));
-                }
+        // EditorPrefs is shared by every project on the machine, so the flag keys on the project.
+        //
+        // What is stored is a token minted at enable time. The same token is written into the project's store as the
+        // enable marker (BrokkrSinkEnabled); the sink runs only while the store still carries it. A re-clone or a
+        // copied .brokkr has no such marker, so an old "enabled" left in EditorPrefs authorizes nothing.
+        internal static string AgentCommandsToken => EditorPrefs.GetString(ProjectKey("AgentCommandsToken"), "");
 
-                EditorPrefs.SetBool(ProjectKey("AgentCommandsEnabled"), value);
-            }
-        }
+        internal static bool AgentCommandsEnabled => AgentCommandsToken.Length > 0;
 
-        // The enable epoch: null while the sink is off. A sink enabled before the epoch was recorded is stamped now,
-        // so intents already waiting expire rather than run.
-        internal static DateTimeOffset? AgentCommandsEnabledSince
-        {
-            get
-            {
-                if (!AgentCommandsEnabled)
-                {
-                    return null;
-                }
+        internal static void EnableAgentCommands(string token) =>
+            EditorPrefs.SetString(ProjectKey("AgentCommandsToken"), token);
 
-                var key = ProjectKey("AgentCommandsEnabledAt");
-                if (DateTimeOffset.TryParse(EditorPrefs.GetString(key, ""), CultureInfo.InvariantCulture,
-                        DateTimeStyles.RoundtripKind, out var since))
-                {
-                    return since;
-                }
-
-                since = DateTimeOffset.UtcNow;
-                EditorPrefs.SetString(key, since.ToString("O"));
-                return since;
-            }
-        }
+        internal static void DisableAgentCommands() => EditorPrefs.DeleteKey(ProjectKey("AgentCommandsToken"));
 
         private static string ProjectKey(string name) => $"GameCult.Brokkr.{name}.{Application.dataPath}";
 

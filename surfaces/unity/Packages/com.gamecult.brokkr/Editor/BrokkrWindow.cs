@@ -128,7 +128,7 @@ namespace GameCult.Brokkr.Editor
                 "Command Sink",
                 BrokkrSettings.AgentCommandsEnabled
                     ? (Mirror.IsRunning ? $"executing intents from {Mirror.CachePath}" : "enabled, mirror not running")
-                    : "off: no intent written into .brokkr will run");
+                    : "off: enabling it expires every intent already waiting in .brokkr");
             allowedAgentActions = EditorGUILayout.TextField("Allowed Actions", allowedAgentActions);
 
             if (GUILayout.Button("Save Settings"))

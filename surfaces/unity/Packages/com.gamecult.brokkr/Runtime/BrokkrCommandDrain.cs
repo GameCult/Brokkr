@@ -1,26 +1,51 @@
 #nullable disable
 using System;
-using System.Globalization;
 using System.Threading.Tasks;
 
 namespace GameCult.Brokkr
 {
+    // What the drain writes through. BrokkrCultMeshMirror is the editor's implementation and the scenario harness
+    // has its own; puts and deletes only stage, and FlushAsync makes them durable (an fsync, so batches share one).
+    public interface IBrokkrCommandStore
+    {
+        Task PutReceiptAsync(BrokkrUnityCommandReceipt receipt);
+        Task PutSinkEnabledAsync(BrokkrSinkEnabled marker);
+        Task DeleteIntentAsync(string commandId);
+        Task DeleteReceiptAsync(string commandId);
+        Task FlushAsync();
+    }
+
     // The one decision path from a pending intent to a receipt. BrokkrEditorService supplies the executor and the
-    // receipt writer; the scenario harness supplies fakes. Nothing else may run an intent.
+    // store; the scenario harness supplies fakes. Nothing else may run an intent.
+    //
+    // Whether an intent may run is decided by what the store holds, never by comparing clocks:
+    //   * EnableAsync is the operator's act. It answers every intent already in the store with "expired" and writes
+    //     a BrokkrSinkEnabled marker carrying a fresh token, all in one flush. The token also lives in the
+    //     editor's own EditorPrefs, so a store this editor did not enable (a re-clone, a copied .brokkr) carries no
+    //     matching marker and DrainAsync refuses to run anything from it.
+    //   * Anything that arrives after the marker is fresh, whatever its writer's clock says.
     //
     // Every intent leaves exactly one of these receipts, and any receipt retires its id (BrokkrCommandLedger):
-    //   expired      stored before the sink was last enabled; the operator never saw it, so it never runs
+    //   expired      in the store when the operator enabled the sink; never runs
     //   denied       admission refused it
     //   attempted    written and flushed BEFORE execution; it stays only if the editor died or the final receipt
     //                could not be written, and the next drain rewrites it as interrupted
     //   interrupted  an attempt that did not finish; it is never run again automatically, the operator decides
     //   accepted / failed / ...  the executor's verdict
-    // A receipt write that fails therefore cannot make an intent run twice: at worst the marker is the answer.
+    // A marker that could not be flushed is withdrawn, so an intent that never started is retried, not reported
+    // as interrupted.
     public sealed class BrokkrCommandDrain
     {
-        // The most intents one drain handles, receipts of every kind included. A flood cannot hold the editor's
-        // update loop; the remainder waits for the next tick.
+        // The most intents one drain executes or denies. A flood cannot hold the editor's update loop.
         public const int MaxPerTick = 16;
+
+        // Answered intents keep their receipt (the CLI reads its own) until this many newer receipts exist; then the
+        // oldest command and receipt are deleted together, at most MaxPrunedPerTick pairs per drain. A caller
+        // waiting for a receipt would need this many newer answers inside its wait to lose it.
+        public const int RetainedReceipts = 1000;
+        public const int MaxPrunedPerTick = 128;
+
+        public const int NotAuthorized = -1;
 
         public const string AttemptedStatus = "attempted";
         public const string InterruptedStatus = "interrupted";
@@ -29,63 +54,120 @@ namespace GameCult.Brokkr
         private readonly BrokkrCommandLedger ledger;
         private readonly BrokkrCommandPolicy policy;
         private readonly Func<BrokkrUnityCommand, BrokkrUnityCommandReceipt> execute;
-        private readonly Func<BrokkrUnityCommandReceipt, Task> publishReceipt;
+        private readonly IBrokkrCommandStore store;
 
         public BrokkrCommandDrain(
             BrokkrCommandLedger ledger,
             BrokkrCommandPolicy policy,
             Func<BrokkrUnityCommand, BrokkrUnityCommandReceipt> execute,
-            Func<BrokkrUnityCommandReceipt, Task> publishReceipt)
+            IBrokkrCommandStore store)
         {
             this.ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
             this.policy = policy ?? throw new ArgumentNullException(nameof(policy));
             this.execute = execute ?? throw new ArgumentNullException(nameof(execute));
-            this.publishReceipt = publishReceipt ?? throw new ArgumentNullException(nameof(publishReceipt));
+            this.store = store ?? throw new ArgumentNullException(nameof(store));
         }
 
-        // sinkEnabledAt is when the operator last turned the sink on. Returns how many intents it answered.
-        public async Task<int> DrainAsync(DateTimeOffset sinkEnabledAt)
+        // The operator turned the sink on. Returns how many waiting intents it expired. The caller keeps the token
+        // and passes it to every DrainAsync; nothing runs before this returns.
+        public async Task<int> EnableAsync(string token)
         {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new ArgumentException("A sink token is required.", nameof(token));
+            }
+
+            var waiting = ledger.Pending(int.MaxValue);
+            foreach (var command in waiting)
+            {
+                await store.PutReceiptAsync(Receipt(command, ExpiredStatus,
+                    "This intent was already in the store when the operator enabled the command sink, so the "
+                    + "operator never saw it. It was not run."));
+            }
+
+            await store.PutSinkEnabledAsync(new BrokkrSinkEnabled { token = token, enabledAt = DateTime.UtcNow.ToString("O") });
+            await store.FlushAsync();
+            return waiting.Length;
+        }
+
+        // Returns how many intents it answered, or NotAuthorized when this store holds no enable marker for the
+        // token: the caller must treat the sink as off until the operator enables it again.
+        public async Task<int> DrainAsync(string token)
+        {
+            if (!ledger.SinkAuthorized(token))
+            {
+                return NotAuthorized;
+            }
+
             // Nothing is in flight at the start of a drain (execution is synchronous inside it), so an attempted
             // receipt found here belongs to a run that never finished.
-            foreach (var attempt in ledger.AttemptedReceipts())
+            var interrupted = ledger.AttemptedReceipts();
+            foreach (var attempt in interrupted)
             {
-                await publishReceipt(Receipt(attempt.commandId, attempt.requestedBy, InterruptedStatus,
+                await store.PutReceiptAsync(Receipt(attempt.commandId, attempt.requestedBy, InterruptedStatus,
                     "The editor stopped, or could not record the result, after starting this intent. It was not run "
                     + "again. Check the project, then send a new intent if it should run."));
             }
 
+            if (interrupted.Length > 0)
+            {
+                await store.FlushAsync();
+            }
+
             var handled = 0;
-            while (handled < MaxPerTick && ledger.TryNextPending(out var command, out var storedAt))
+            foreach (var command in ledger.Pending(MaxPerTick))
             {
                 handled++;
-                if (!DateTimeOffset.TryParse(storedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var stored)
-                    || stored < sinkEnabledAt)
-                {
-                    await publishReceipt(Receipt(command, ExpiredStatus,
-                        "This intent was stored before the command sink was last enabled, so the operator never saw "
-                        + "it. It was not run."));
-                    continue;
-                }
-
                 var admission = policy.Decide(command);
                 if (!admission.Allowed)
                 {
                     var denied = admission.DeniedReceipt(command);
                     denied.requestedBy = command.requestedBy;
-                    await publishReceipt(denied);
+                    await store.PutReceiptAsync(denied);
+                    await store.FlushAsync();
                     continue;
                 }
 
                 // Durable before any effect: a crash after this line leaves the marker, never a second run.
-                await publishReceipt(Receipt(command, AttemptedStatus, "Started; no result recorded yet."));
+                await MarkAttemptedAsync(command);
                 var receipt = execute(command);
                 receipt.commandId = command.commandId;
                 receipt.requestedBy = command.requestedBy;
-                await publishReceipt(receipt);
+                await store.PutReceiptAsync(receipt);
+                await store.FlushAsync();
+            }
+
+            var pruned = ledger.Prunable(RetainedReceipts, MaxPrunedPerTick);
+            foreach (var commandId in pruned)
+            {
+                // The intent goes first: a receipt without its intent is harmless, an intent without its receipt
+                // would run again.
+                await store.DeleteIntentAsync(commandId);
+                await store.DeleteReceiptAsync(commandId);
+            }
+
+            if (pruned.Length > 0)
+            {
+                await store.FlushAsync();
             }
 
             return handled;
+        }
+
+        private async Task MarkAttemptedAsync(BrokkrUnityCommand command)
+        {
+            try
+            {
+                await store.PutReceiptAsync(Receipt(command, AttemptedStatus, "Started; no result recorded yet."));
+                await store.FlushAsync();
+            }
+            catch
+            {
+                // Nothing has run. Withdraw the marker so this reads as never started and is retried; if the store
+                // will not even do that, the leftover marker is reported as interrupted, which errs safe.
+                try { await store.DeleteReceiptAsync(command.commandId); } catch { }
+                throw;
+            }
         }
 
         private static BrokkrUnityCommandReceipt Receipt(BrokkrUnityCommand command, string status, string message) =>

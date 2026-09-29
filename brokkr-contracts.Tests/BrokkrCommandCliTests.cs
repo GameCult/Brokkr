@@ -135,7 +135,7 @@ public sealed class BrokkrCommandCliTests
     {
         using var project = new ScratchProject();
         using var editor = await EditorProbe.StartAsync(project.StorePath);
-        editor.AgentCommandsEnabled = false;
+        editor.DisableSink();
         await editor.TickAsync();
 
         var result = await RunAsync("--unity-cache", project.StorePath, "--action", "readHost");
@@ -149,7 +149,7 @@ public sealed class BrokkrCommandCliTests
     {
         using var project = new ScratchProject();
         using var editor = await EditorProbe.StartAsync(project.StorePath);
-        editor.AgentCommandsEnabled = false;
+        editor.DisableSink();
         await editor.TickAsync();
         editor.Dispose();
 

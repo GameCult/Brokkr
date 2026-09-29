@@ -10,8 +10,8 @@ namespace Brokkr.Contracts.Tests;
 // node with StartServer=false over a directory store and durable shard logs) and runs one service tick in the
 // service order: pull, drain pending intents through BrokkrCommandDrain (the same class the service uses), host
 // snapshot, soft flush. "Executing" an intent only records it, so the scenarios measure delivery and once-only
-// execution, not Unity.
-internal sealed class EditorProbe : IDisposable
+// execution, not Unity. It is also the drain's IBrokkrCommandStore, with knobs to make the store fail.
+internal sealed class EditorProbe : IDisposable, IBrokkrCommandStore
 {
     private readonly CultMeshNode node;
     private readonly BrokkrCommandLedger ledger;
@@ -25,17 +25,21 @@ internal sealed class EditorProbe : IDisposable
     // What the "editor" answers with. Real Unity answers accepted or failed per the executor.
     internal Func<BrokkrUnityCommand, string> StatusFor { get; set; } = _ => "accepted";
 
-    // What the host snapshot says about the sink; the real editor reports the operator's toggle.
-    internal bool AgentCommandsEnabled { get; set; } = true;
+    // The token the operator's enable left in EditorPrefs; null while the sink is off. A probe starts with the sink
+    // enabled, as an editor whose operator enabled it earlier and whose store already carries the marker.
+    internal string? SinkToken { get; private set; } = "probe-token";
 
-    // When the operator last enabled the sink; intents stored earlier expire.
-    internal DateTimeOffset EnabledAt { get; set; } = DateTimeOffset.MinValue;
+    internal bool AgentCommandsEnabled => SinkToken != null;
 
     // Runs inside the "executor", after the intent is recorded.
     internal Action<BrokkrUnityCommand>? OnExecute { get; set; }
 
-    // Makes a receipt write throw, as a full disk or a lease timeout would.
-    internal Func<BrokkrUnityCommandReceipt, bool>? FailReceiptWrite { get; set; }
+    // Makes a receipt put or a flush throw, as a full disk or a lease timeout would.
+    internal Func<BrokkrUnityCommandReceipt, bool>? FailReceiptPut { get; set; }
+    internal Func<bool>? FailFlush { get; set; }
+
+    // Flushes the drain asked for; each is an fsync in the real store.
+    internal int Flushes { get; private set; }
 
     private EditorProbe(CultMeshNode node)
     {
@@ -43,7 +47,7 @@ internal sealed class EditorProbe : IDisposable
         ledger = new BrokkrCommandLedger(node.Cache);
     }
 
-    internal static async Task<EditorProbe> StartAsync(string cachePath)
+    // enabledInStore false is an editor whose EditorPrefs still hold a token, opening a store that never saw that\n    // enable: a re-clone, or a copied .brokkr.\n    internal static async Task<EditorProbe> StartAsync(string cachePath, bool enabledInStore = true)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
         var node = await CultMesh.CreateNodeAsync(cachePath, new CultMeshNodeOptions
@@ -53,39 +57,57 @@ internal sealed class EditorProbe : IDisposable
             EnableDurableShardLogs = true,
             DatabaseOptions = new CultNetDatabaseOptions { RuntimeId = "brokkr-unity-editor" }
         });
-        return new EditorProbe(node);
+        var probe = new EditorProbe(node);
+        // A restart with the token persisted finds its marker; a first start is the operator's enable.
+        if (enabledInStore && !probe.ledger.SinkAuthorized(probe.SinkToken))
+            await NewDrain(probe).EnableAsync(probe.SinkToken!);
+        return probe;
     }
 
-    // Returns how many intents the drain answered.
+    private static BrokkrCommandDrain NewDrain(EditorProbe probe) =>
+        new(
+            probe.ledger,
+            probe.policy,
+            command =>
+            {
+                probe.Executed.Add(command);
+                probe.OnExecute?.Invoke(command);
+                return new BrokkrUnityCommandReceipt
+                {
+                    commandId = command.commandId,
+                    status = probe.StatusFor(command),
+                    message = "probe",
+                    observedAt = DateTime.UtcNow.ToString("O")
+                };
+            },
+            probe);
+
+    // The operator ticks the toggle off.
+    internal void DisableSink() => SinkToken = null;
+
+    // The operator ticks it on: a new token, every waiting intent expired, one flush. Returns how many expired.
+    internal async Task<int> EnableSinkAsync()
+    {
+        await ledger.PullAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var expired = await NewDrain(this).EnableAsync(token);
+        SinkToken = token;
+        return expired;
+    }
+
+    // Returns how many intents the drain answered (0 with the sink off).
     internal async Task<int> TickAsync()
     {
+        await ledger.PullAsync();
         var handled = 0;
-        if (AgentCommandsEnabled)
+        if (SinkToken != null)
         {
-            await ledger.PullAsync();
-            var drain = new BrokkrCommandDrain(
-                ledger,
-                policy,
-                command =>
-                {
-                    Executed.Add(command);
-                    OnExecute?.Invoke(command);
-                    return new BrokkrUnityCommandReceipt
-                    {
-                        commandId = command.commandId,
-                        status = StatusFor(command),
-                        message = "probe",
-                        observedAt = DateTime.UtcNow.ToString("O")
-                    };
-                },
-                async receipt =>
-                {
-                    if (FailReceiptWrite?.Invoke(receipt) == true)
-                        throw new IOException("receipt write failed");
-                    await node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
-                    await node.FlushAsync(soft: true);
-                });
-            handled = await drain.DrainAsync(EnabledAt);
+            handled = await NewDrain(this).DrainAsync(SinkToken);
+            if (handled == BrokkrCommandDrain.NotAuthorized)
+            {
+                SinkToken = null;
+                handled = 0;
+            }
         }
 
         await node.Database.PutAsync(
@@ -94,12 +116,35 @@ internal sealed class EditorProbe : IDisposable
             {
                 observedAt = DateTime.UtcNow.ToString("O"),
                 projectPath = "probe",
-                agentCommandsEnabled = AgentCommandsEnabled,
-                agentCommandsEnabledAt = AgentCommandsEnabled ? EnabledAt.ToString("O") : ""
+                agentCommandsEnabled = AgentCommandsEnabled
             });
         await node.FlushAsync(soft: true);
         return handled;
     }
+
+    public Task PutReceiptAsync(BrokkrUnityCommandReceipt receipt)
+    {
+        if (FailReceiptPut?.Invoke(receipt) == true)
+            throw new IOException("receipt write failed");
+        return node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
+    }
+
+    public Task PutSinkEnabledAsync(BrokkrSinkEnabled marker) => node.Database.PutAsync(BrokkrCommandLedger.SinkKey, marker);
+
+    public Task DeleteIntentAsync(string commandId) =>
+        node.Database.DeleteAsync<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey(commandId));
+
+    public Task DeleteReceiptAsync(string commandId) =>
+        node.Database.DeleteAsync<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(commandId));
+
+    public Task FlushAsync()
+    {
+        if (FailFlush?.Invoke() == true)
+            throw new IOException("flush failed");
+        Flushes++;
+        return node.FlushAsync(soft: true);
+    }
+
     public void Dispose() => node.Dispose();
 }
 
@@ -117,6 +162,17 @@ internal sealed class ScratchProject : IDisposable
         await writer.AddAsync(
             new BrokkrUnityCommand { commandId = commandId, action = action },
             new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey(commandId)));
+        await writer.FlushAsync();
+    }
+
+    // Many intents in one open and one flush, for the flood scenarios.
+    internal async Task WriteCommandsAsync(IEnumerable<string> commandIds, string action = "refreshAssets")
+    {
+        using var writer = OpenCache();
+        foreach (var commandId in commandIds)
+            await writer.AddAsync(
+                new BrokkrUnityCommand { commandId = commandId, action = action },
+                new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey(commandId)));
         await writer.FlushAsync();
     }
 
