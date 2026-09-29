@@ -30,7 +30,10 @@ namespace GameCult.Brokkr
         public Task PullAsync() => cache.PullAllBackingStoresAsync();
 
         // The oldest unanswered intent by stored-at. Exact ties keep the cache's own order (schema, then key): the sort is stable.
-        public bool TryNextPending(out BrokkrUnityCommand command)
+        public bool TryNextPending(out BrokkrUnityCommand command) => TryNextPending(out command, out _);
+
+        // storedAt is the cache's own stamp for the intent (round-trip ISO 8601), minted when the writer stored it.
+        public bool TryNextPending(out BrokkrUnityCommand command, out string storedAt)
         {
             var stored = cache.AllStoredDocuments.ToArray();
             var answered = new HashSet<string>(
@@ -39,13 +42,26 @@ namespace GameCult.Brokkr
                     .Where(id => !string.IsNullOrWhiteSpace(id)),
                 StringComparer.Ordinal);
 
-            command = stored
+            var next = stored
                 .Where(entry => entry.Document is BrokkrUnityCommand)
                 .OrderBy(entry => entry.StoredAt, StringComparer.Ordinal)
-                .Select(entry => (BrokkrUnityCommand)entry.Document)
-                .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.commandId)
-                                             && !answered.Contains(candidate.commandId));
+                .FirstOrDefault(entry =>
+                {
+                    var candidate = (BrokkrUnityCommand)entry.Document;
+                    return !string.IsNullOrWhiteSpace(candidate.commandId) && !answered.Contains(candidate.commandId);
+                });
+            command = next?.Document as BrokkrUnityCommand;
+            storedAt = next?.StoredAt;
             return command != null;
         }
+
+        // Receipts that say an intent was started and never finished (see BrokkrCommandDrain).
+        public BrokkrUnityCommandReceipt[] AttemptedReceipts() =>
+            cache.AllStoredDocuments
+                .Select(entry => entry.Document)
+                .OfType<BrokkrUnityCommandReceipt>()
+                .Where(receipt => string.Equals(receipt.status, BrokkrCommandDrain.AttemptedStatus, StringComparison.Ordinal)
+                                  && !string.IsNullOrWhiteSpace(receipt.commandId))
+                .ToArray();
     }
 }

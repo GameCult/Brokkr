@@ -45,6 +45,7 @@ namespace GameCult.Brokkr.Editor
                     .ToArray(),
                 assetCount = AssetDatabase.GetAllAssetPaths().Length,
                 agentCommandsEnabled = BrokkrSettings.AgentCommandsEnabled,
+                agentCommandsEnabledAt = BrokkrSettings.AgentCommandsEnabledSince?.ToString("O") ?? "",
                 isPlaying = EditorApplication.isPlaying,
                 isPaused = EditorApplication.isPaused,
                 isCompiling = EditorApplication.isCompiling,

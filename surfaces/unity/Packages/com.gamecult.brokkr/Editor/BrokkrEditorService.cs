@@ -8,7 +8,7 @@ namespace GameCult.Brokkr.Editor
 {
     // The only owner of command execution in the editor. It owns the mirror, the pull cadence and the drain; the
     // window is a caller (it writes intents) and a display (it reads state from here). Nothing else calls
-    // BrokkrCommandLedger.TryNextPending or BrokkrUnityCommandExecutor.Execute.
+    // BrokkrCommandLedger.TryNextPending or BrokkrUnityCommandExecutor.Execute (both go through BrokkrCommandDrain).
     //
     // The command sink is off until the operator enables it for this project (BrokkrSettings.AgentCommandsEnabled).
     // Loading the package opens no store and executes nothing.
@@ -73,12 +73,19 @@ namespace GameCult.Brokkr.Editor
             await PublishSnapshotAsync();
         }
 
-        internal static async Task PublishSnapshotAsync()
+        // The only writer of unity/host/current. It captures fresh every time, so the published flags always
+        // describe the editor now; the window asks for a publish and never carries a snapshot of its own to the
+        // store. Returns what it published, or null when the mirror is not running.
+        internal static async Task<BrokkrHostSnapshot> PublishSnapshotAsync()
         {
-            if (MirrorInstance.IsRunning)
+            if (!MirrorInstance.IsRunning)
             {
-                await MirrorInstance.PublishSnapshotAsync(BrokkrUnitySnapshotBuilder.Capture());
+                return null;
             }
+
+            var snapshot = BrokkrUnitySnapshotBuilder.Capture();
+            await MirrorInstance.PublishSnapshotAsync(snapshot);
+            return snapshot;
         }
 
         private static void Tick()
@@ -93,7 +100,8 @@ namespace GameCult.Brokkr.Editor
                 LastSyncReceipt = syncReceipt;
             }
 
-            if (!BrokkrSettings.AgentCommandsEnabled || EditorApplication.timeSinceStartup < nextPullAt)
+            var enabledSince = BrokkrSettings.AgentCommandsEnabledSince;
+            if (enabledSince == null || EditorApplication.timeSinceStartup < nextPullAt)
             {
                 return;
             }
@@ -102,7 +110,7 @@ namespace GameCult.Brokkr.Editor
             try
             {
                 MirrorInstance.PullExternalUpdatesAsync().GetAwaiter().GetResult();
-                DrainCommands();
+                DrainCommands(enabledSince.Value);
             }
             catch (Exception error)
             {
@@ -110,26 +118,17 @@ namespace GameCult.Brokkr.Editor
             }
         }
 
-        private static void DrainCommands()
+        // Every rule about whether and when an intent runs lives in BrokkrCommandDrain; this only supplies the
+        // executor and the receipt writer.
+        private static void DrainCommands(DateTimeOffset enabledSince)
         {
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
-            var policy = new BrokkrCommandPolicy(projectRoot, BrokkrSettings.AllowedAgentActions);
-            var drained = false;
-            while (MirrorInstance.Ledger.TryNextPending(out var command))
-            {
-                // The one call path into the executor, and admission is its precondition.
-                var admission = policy.Decide(command);
-                var receipt = admission.Allowed
-                    ? BrokkrUnityCommandExecutor.Execute(command)
-                    : admission.DeniedReceipt(command);
-                // The receipt answers exactly the id it ran, or the ledger would offer the intent again.
-                receipt.commandId = command.commandId;
-                receipt.requestedBy = command.requestedBy;
-                MirrorInstance.PublishReceiptAsync(receipt).GetAwaiter().GetResult();
-                drained = true;
-            }
-
-            if (drained)
+            var drain = new BrokkrCommandDrain(
+                MirrorInstance.Ledger,
+                new BrokkrCommandPolicy(projectRoot, BrokkrSettings.AllowedAgentActions),
+                BrokkrUnityCommandExecutor.Execute,
+                MirrorInstance.PublishReceiptAsync);
+            if (drain.DrainAsync(enabledSince).GetAwaiter().GetResult() > 0)
             {
                 PublishSnapshotAsync().GetAwaiter().GetResult();
             }

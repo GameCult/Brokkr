@@ -29,6 +29,9 @@ namespace GameCult.Brokkr
         [Key(17)] public bool isUpdating;
         // False means the editor executes no agent commands: the operator has not enabled the sink.
         [Key(18)] public bool agentCommandsEnabled;
+        // When the operator last enabled the sink (round-trip ISO 8601), empty while it is off. Intents stored before
+        // this instant expire instead of running (BrokkrCommandDrain).
+        [Key(19)] public string agentCommandsEnabledAt = "";
     }
 
     [CultDocument("brokkr.unity.snapshot_receipt", "brokkr.unity.snapshot_receipt.v0")]

@@ -1,3 +1,5 @@
+using System;
+using System.Globalization;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -24,10 +26,43 @@ namespace GameCult.Brokkr.Editor
 
         // Whether this editor executes intents that agents write into .brokkr. Off until the operator turns it on.
         // EditorPrefs is shared by every project on the machine, so the store path and the flag both key on the project.
+        // Turning it on stamps the enable epoch; intents stored before that instant never run (BrokkrCommandDrain).
         internal static bool AgentCommandsEnabled
         {
             get => EditorPrefs.GetBool(ProjectKey("AgentCommandsEnabled"), false);
-            set => EditorPrefs.SetBool(ProjectKey("AgentCommandsEnabled"), value);
+            set
+            {
+                if (value && !AgentCommandsEnabled)
+                {
+                    EditorPrefs.SetString(ProjectKey("AgentCommandsEnabledAt"), DateTimeOffset.UtcNow.ToString("O"));
+                }
+
+                EditorPrefs.SetBool(ProjectKey("AgentCommandsEnabled"), value);
+            }
+        }
+
+        // The enable epoch: null while the sink is off. A sink enabled before the epoch was recorded is stamped now,
+        // so intents already waiting expire rather than run.
+        internal static DateTimeOffset? AgentCommandsEnabledSince
+        {
+            get
+            {
+                if (!AgentCommandsEnabled)
+                {
+                    return null;
+                }
+
+                var key = ProjectKey("AgentCommandsEnabledAt");
+                if (DateTimeOffset.TryParse(EditorPrefs.GetString(key, ""), CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind, out var since))
+                {
+                    return since;
+                }
+
+                since = DateTimeOffset.UtcNow;
+                EditorPrefs.SetString(key, since.ToString("O"));
+                return since;
+            }
         }
 
         private static string ProjectKey(string name) => $"GameCult.Brokkr.{name}.{Application.dataPath}";
