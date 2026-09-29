@@ -47,7 +47,9 @@ internal sealed class EditorProbe : IDisposable, IBrokkrCommandStore
         ledger = new BrokkrCommandLedger(node.Cache);
     }
 
-    // enabledInStore false is an editor whose EditorPrefs still hold a token, opening a store that never saw that\n    // enable: a re-clone, or a copied .brokkr.\n    internal static async Task<EditorProbe> StartAsync(string cachePath, bool enabledInStore = true)
+    // enabledInStore false is an editor whose EditorPrefs still hold a token, opening a store that never saw that
+    // enable: a re-clone, or a copied .brokkr.
+    internal static async Task<EditorProbe> StartAsync(string cachePath, bool enabledInStore = true)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
         var node = await CultMesh.CreateNodeAsync(cachePath, new CultMeshNodeOptions
