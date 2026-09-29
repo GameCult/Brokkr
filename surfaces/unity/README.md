@@ -9,13 +9,14 @@ CultMesh.
 Add this package to a Unity project's `Packages/manifest.json`:
 
 ```json
-"com.gamecult.brokkr": "file:E:/Projects/Brokkr/surfaces/unity/Packages/com.gamecult.brokkr"
+"com.gamecult.brokkr": "file:F:/Projects/Brokkr/surfaces/unity/Packages/com.gamecult.brokkr"
 ```
 
-Vendor the CultMesh runtime DLLs before opening Unity:
+The package ships no assemblies. Its CultCache, CultNet and CultMesh runtime
+comes from `org.gamecult.cultlib`, which the host manifest must also resolve:
 
-```powershell
-.\tools\vendor-cultmesh-unity.ps1
+```json
+"org.gamecult.cultlib": "https://github.com/GameCult/CultLib.git?path=/unity/org.gamecult.cultlib#cultlib-unity-v1.0.60"
 ```
 
 Then open `GameCult > Brokkr`.

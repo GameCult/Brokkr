@@ -2,8 +2,7 @@
   "name": "GameCult.Brokkr",
   "rootNamespace": "GameCult.Brokkr",
   "references": [
-    "GameCult.Caching",
-    "MessagePack"
+    "GameCult.CultLib"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

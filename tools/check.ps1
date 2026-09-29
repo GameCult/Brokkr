@@ -1,3 +1,5 @@
+param([string]$CultLibRoot = "F:\Projects\CultLib")
+
 $ErrorActionPreference = "Stop"
 
 function Assert-NativeSuccess {
@@ -48,21 +50,14 @@ try {
     Assert-Contains $syncContractText "timeline-frame" "sync contract"
     Assert-Contains $syncContractText "cinemachine-virtual-camera" "sync contract"
 
-    $pluginRoot = Join-Path (Get-Location) "surfaces\unity\Packages\com.gamecult.brokkr\Plugins\CultMesh"
-    $requiredDlls = @(
-        "GameCult.Caching.dll",
-        "GameCult.Caching.MessagePack.dll",
-        "GameCult.Mesh.dll",
-        "GameCult.Networking.dll",
-        "MessagePack.dll",
-        "R3.dll"
-    )
-
-    foreach ($dll in $requiredDlls) {
-        $path = Join-Path $pluginRoot $dll
-        if (-not (Test-Path $path)) {
-            throw "Missing vendored CultMesh Unity dependency: $path"
-        }
+    $unityPackage = Join-Path (Get-Location) "surfaces\unity\Packages\com.gamecult.brokkr"
+    $vendoredDlls = @(Get-ChildItem -Path $unityPackage -Recurse -Filter "*.dll" -File)
+    if ($vendoredDlls.Count -gt 0) {
+        throw "The Brokkr Unity package must not ship assemblies; org.gamecult.cultlib owns them: $($vendoredDlls.FullName -join ', ')"
+    }
+    $unityManifest = Get-Content (Join-Path $unityPackage "package.json") -Raw | ConvertFrom-Json
+    if (-not $unityManifest.dependencies.PSObject.Properties["org.gamecult.cultlib"]) {
+        throw "surfaces/unity package.json must depend on org.gamecult.cultlib."
     }
 
     $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
@@ -87,11 +82,12 @@ try {
     & $pythonExe -m py_compile surfaces\blender\brokkr_bridge\blender_target.py surfaces\blender\brokkr_bridge\__init__.py
     Assert-NativeSuccess "Blender adapter Python compile"
 
-    $cultLibPySrc = "E:\Projects\CultLib-main-work\packages\cultcache-py\src"
-    if (Test-Path $cultLibPySrc) {
-        & $pythonExe -c "import sys, tempfile; sys.path.insert(0, r'$cultLibPySrc'); sys.path.insert(0, r'surfaces\blender\brokkr_bridge'); import blender_target; cultmesh, cultcache = blender_target._load_cultmesh(r'$cultLibPySrc'); doc = cultcache.define_document_type('brokkr.check.v0'); node = cultmesh.CultMesh.start_node(tempfile.NamedTemporaryFile(suffix='.ccmp').name, runtime_id='brokkr-check'); node.database.register_document(doc); node.database.put(doc, 'check', {'ok': True}); assert node.database.snapshot()['brokkr.check.v0']['check']['ok'] is True; server = cultmesh.CultMesh.serve_node(node, host='127.0.0.1', port=0); assert server.port > 0; server.stop()"
-        Assert-NativeSuccess "Blender adapter CultMesh import"
+    $cultLibPackages = Join-Path $CultLibRoot "packages"
+    if (-not (Test-Path $cultLibPackages)) {
+        throw "CultLib packages directory not found: $cultLibPackages (pass -CultLibRoot)."
     }
+    & $pythonExe -c "import sys, tempfile; sys.path.insert(0, r'surfaces\blender\brokkr_bridge'); import blender_target; cultmesh, cultcache = blender_target._load_cultmesh(r'$cultLibPackages'); doc = cultcache.define_document_type('brokkr.check.v0'); node = cultmesh.CultMesh.start_node(tempfile.NamedTemporaryFile(suffix='.ccmp').name, runtime_id='brokkr-check'); node.database.register_document(doc); node.database.put(doc, 'check', {'ok': True}); assert node.database.snapshot()['brokkr.check.v0']['check']['ok'] is True; server = cultmesh.CultMesh.serve_node(node, host='127.0.0.1', port=0); assert server.port > 0; server.stop()"
+    Assert-NativeSuccess "Blender adapter CultMesh import"
 }
 finally {
     Pop-Location
