@@ -1,6 +1,12 @@
 # Brokkr: adopting `codex/cultmesh-unity-dll-refresh` — cut map
 
-Status: cut map, nothing landed. Written by Imagination on 2026-09-29.
+Status (2026-09-30): M1-M2 landed at `15c735c`. A1-A5 (agent access) landed at `90892f0` after four Soul passes; pass 4 verdict was merge.
+
+Recorded follow-ups:
+- `BrokkrCommandStore.TryCommitEnableAsync` does not retry when a concurrent `Database.PutAsync` leaves staged writes. CultCache throws at `CultCache.cs:2297` instead of refusing the commit, so the 8-attempt loop never runs. The enable fails safe (nothing written, sink stays off). This is unreachable while every path runs on Unity's main thread. Fix it if anything publishes from another thread: catch, flush, return false.
+- A forward wall-clock step longer than 5 minutes, with more than 1000 receipts, prunes receipts early. That can include receipts a CLI caller is still waiting on. Accepted.
+
+Written by Imagination on 2026-09-29.
 
 Measured against:
 - Brokkr `main` at `7255203`;
