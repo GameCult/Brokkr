@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using GameCult.Brokkr;
 using UnityEditor;
 using UnityEngine;
@@ -10,13 +11,12 @@ namespace GameCult.Brokkr.Editor
         private string brokerUri = BrokkrSettings.DefaultBrokerUri;
         private string cultMeshCachePath = "";
         private bool autoPublish;
-        private bool autoPollCommands;
+        private string allowedAgentActions = "";
         private BrokkrHostSnapshot lastSnapshot;
         private BrokkrSyncReceipt lastSyncReceipt;
         private string lastReceipt = "No snapshot published yet.";
         private MessageType lastMessageType = MessageType.Info;
-        private double nextPollAt;
-        private BrokkrCultMeshMirror mirror;
+        private static BrokkrCultMeshMirror Mirror => BrokkrEditorService.Mirror;
         private string syncSessionId = "default";
         private string syncDisplayName = "Brokkr Editor Sync";
         private string blenderObjectName = "";
@@ -67,7 +67,7 @@ namespace GameCult.Brokkr.Editor
             brokerUri = BrokkrSettings.BrokerUri;
             cultMeshCachePath = BrokkrSettings.CultMeshCachePath;
             autoPublish = BrokkrSettings.AutoPublish;
-            autoPollCommands = BrokkrSettings.AutoPollCommands;
+            allowedAgentActions = string.Join(",", BrokkrSettings.AllowedAgentActions);
             syncSessionId = BrokkrSettings.SyncSessionId;
             syncDisplayName = BrokkrSettings.SyncDisplayName;
             blenderObjectName = BrokkrSettings.BlenderObjectName;
@@ -108,8 +108,6 @@ namespace GameCult.Brokkr.Editor
             EditorSceneManagerBridge.SceneDirtied -= OnEditorSignal;
             EditorApplication.playModeStateChanged -= OnPlayModeChanged;
             EditorApplication.update -= OnEditorUpdate;
-            mirror?.Dispose();
-            mirror = null;
         }
 
         private void OnGUI()
@@ -119,14 +117,26 @@ namespace GameCult.Brokkr.Editor
             brokerUri = EditorGUILayout.TextField("Broker URI", brokerUri);
             cultMeshCachePath = EditorGUILayout.TextField("CultMesh Cache", cultMeshCachePath);
             autoPublish = EditorGUILayout.Toggle("Auto Publish", autoPublish);
-            autoPollCommands = EditorGUILayout.Toggle("Auto Poll Commands", autoPollCommands);
+
+            var agentCommands = EditorGUILayout.Toggle("Agent Commands", BrokkrSettings.AgentCommandsEnabled);
+            if (agentCommands != BrokkrSettings.AgentCommandsEnabled)
+            {
+                SetAgentCommands(agentCommands);
+            }
+
+            EditorGUILayout.LabelField(
+                "Command Sink",
+                BrokkrSettings.AgentCommandsEnabled
+                    ? (Mirror.IsRunning ? $"executing intents from {Mirror.CachePath}" : "enabled, mirror not running")
+                    : "off: enabling it expires every intent already waiting in .brokkr");
+            allowedAgentActions = EditorGUILayout.TextField("Allowed Actions", allowedAgentActions);
 
             if (GUILayout.Button("Save Settings"))
             {
                 BrokkrSettings.BrokerUri = brokerUri;
                 BrokkrSettings.CultMeshCachePath = cultMeshCachePath;
                 BrokkrSettings.AutoPublish = autoPublish;
-                BrokkrSettings.AutoPollCommands = autoPollCommands;
+                BrokkrSettings.AllowedAgentActions = BrokkrCommandPolicy.ParseAllowedActions(allowedAgentActions).ToArray();
                 BrokkrSettings.SyncSessionId = syncSessionId;
                 BrokkrSettings.SyncDisplayName = syncDisplayName;
                 BrokkrSettings.BlenderObjectName = blenderObjectName;
@@ -177,16 +187,6 @@ namespace GameCult.Brokkr.Editor
                 if (GUILayout.Button("Capture Snapshot"))
                 {
                     CaptureSnapshot();
-                }
-
-                if (GUILayout.Button("Poll Mirror Command"))
-                {
-                    PollAndExecuteCommand(false);
-                }
-
-                if (GUILayout.Button("Poll Sync Receipt"))
-                {
-                    PollSyncReceipts(false);
                 }
             }
 
@@ -341,18 +341,28 @@ namespace GameCult.Brokkr.Editor
             SetStatus("Captured Unity editor host snapshot.", MessageType.Info);
         }
 
+        // Asks the editor service to capture and publish a fresh snapshot. The window never writes
+        // unity/host/current itself: a snapshot it captured earlier could carry stale flags.
         private void PublishSnapshot()
         {
             try
             {
-                if (lastSnapshot == null)
-                {
-                    lastSnapshot = BrokkrUnitySnapshotBuilder.Capture();
-                }
-
                 RequireMirror();
-                mirror.PublishSnapshotAsync(lastSnapshot).GetAwaiter().GetResult();
+                lastSnapshot = BrokkrEditorService.PublishSnapshotAsync().GetAwaiter().GetResult();
                 SetStatus($"Mirrored Unity snapshot: {lastSnapshot.observedAt}", MessageType.Info);
+            }
+            catch (Exception error)
+            {
+                SetStatus(error.Message, MessageType.Error);
+            }
+        }
+
+        private async void SetAgentCommands(bool enabled)
+        {
+            try
+            {
+                await BrokkrEditorService.SetAgentCommandsEnabledAsync(enabled);
+                SetStatus(enabled ? "Agent commands enabled for this project." : "Agent commands disabled.", MessageType.Info);
             }
             catch (Exception error)
             {
@@ -364,72 +374,24 @@ namespace GameCult.Brokkr.Editor
         {
             try
             {
-                mirror ??= new BrokkrCultMeshMirror();
-                await mirror.StartAsync(cultMeshCachePath);
-                SetStatus($"CultMesh mirror running: {mirror.CachePath}", MessageType.Info);
+                if (Mirror.IsRunning && Mirror.CachePath != cultMeshCachePath)
+                {
+                    throw new InvalidOperationException(
+                        $"The mirror is already running at {Mirror.CachePath}; a new path applies after an editor restart.");
+                }
+
+                BrokkrSettings.CultMeshCachePath = cultMeshCachePath;
+                await BrokkrEditorService.StartAsync();
+                if (!Mirror.IsRunning)
+                {
+                    throw new InvalidOperationException("The mirror did not start; see the Console.");
+                }
+
+                SetStatus($"CultMesh mirror running: {Mirror.CachePath}", MessageType.Info);
             }
             catch (Exception error)
             {
                 SetStatus(error.Message, MessageType.Error);
-            }
-        }
-
-        private void PollAndExecuteCommand(bool quiet)
-        {
-            try
-            {
-                RequireMirror();
-                if (!mirror.TryDequeueCommand(out var command) || string.IsNullOrEmpty(command.commandId))
-                {
-                    if (!quiet)
-                    {
-                        SetStatus("No queued CultMesh Unity command.", MessageType.Info);
-                    }
-
-                    return;
-                }
-
-                var receipt = BrokkrUnityCommandExecutor.Execute(command);
-                mirror.PublishReceiptAsync(receipt).GetAwaiter().GetResult();
-                lastSnapshot = BrokkrUnitySnapshotBuilder.Capture();
-                mirror.PublishSnapshotAsync(lastSnapshot).GetAwaiter().GetResult();
-                SetStatus($"Command {receipt.status}: {receipt.commandId} {receipt.message}", MessageType.Info);
-            }
-            catch (Exception error)
-            {
-                SetStatus(error.Message, MessageType.Error);
-            }
-        }
-
-        private void PollSyncReceipts(bool quiet)
-        {
-            try
-            {
-                RequireMirror();
-                var sawReceipt = false;
-                while (mirror.TryDequeueSyncReceipt(out var receipt) && receipt != null)
-                {
-                    lastSyncReceipt = receipt;
-                    sawReceipt = true;
-                }
-
-                if (sawReceipt)
-                {
-                    Repaint();
-                    return;
-                }
-
-                if (!quiet)
-                {
-                    SetStatus("No queued Brokkr sync receipt.", MessageType.Info);
-                }
-            }
-            catch (Exception error)
-            {
-                if (!quiet)
-                {
-                    SetStatus(error.Message, MessageType.Error);
-                }
             }
         }
 
@@ -453,7 +415,7 @@ namespace GameCult.Brokkr.Editor
                         ? "Assets/BrokkrAsset.asset"
                         : scriptableObjectAssetPath.Trim()
                 };
-                PublishCommandAndPoll(command);
+                PublishCommand(command);
             }
             catch (Exception error)
             {
@@ -480,7 +442,7 @@ namespace GameCult.Brokkr.Editor
                     name = prefabInstanceName.Trim(),
                     parentObjectId = selected != null ? BrokkrUnitySnapshotBuilder.GetObjectId(selected) : ""
                 };
-                PublishCommandAndPoll(command);
+                PublishCommand(command);
             }
             catch (Exception error)
             {
@@ -508,7 +470,7 @@ namespace GameCult.Brokkr.Editor
                         ? "Assets/BrokkrPrefabVariant.prefab"
                         : prefabVariantPath.Trim()
                 };
-                PublishCommandAndPoll(command);
+                PublishCommand(command);
             }
             catch (Exception error)
             {
@@ -516,10 +478,16 @@ namespace GameCult.Brokkr.Editor
             }
         }
 
-        private void PublishCommandAndPoll(BrokkrUnityCommand command)
+        // The window writes the intent and stops. The editor service executes it, and only while the operator has
+        // enabled agent commands for this project.
+        private void PublishCommand(BrokkrUnityCommand command)
         {
-            mirror.PublishCommandAsync(command).GetAwaiter().GetResult();
-            PollAndExecuteCommand(true);
+            Mirror.PublishCommandAsync(command).GetAwaiter().GetResult();
+            SetStatus(
+                BrokkrSettings.AgentCommandsEnabled
+                    ? $"Published intent {command.commandId}; the editor service will run it."
+                    : $"Published intent {command.commandId}. Agent Commands is off, so nothing will run it.",
+                MessageType.Info);
         }
 
         private void PublishSelectedObjectSync()
@@ -551,8 +519,8 @@ namespace GameCult.Brokkr.Editor
                     updatedAt = now
                 };
 
-                mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
-                mirror.PublishSyncObjectBindingAsync(binding).GetAwaiter().GetResult();
+                Mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
+                Mirror.PublishSyncObjectBindingAsync(binding).GetAwaiter().GetResult();
                 PublishSyncVar(bindingId, "transform", "Transform", "m_LocalPosition,m_LocalRotation,m_LocalScale", "location,rotationEuler,scale", syncTransform, "linear", now);
                 PublishSyncVar(bindingId, "parent", "Parent", "parentId", "parentName", syncParent, "step", now);
                 PublishSyncVar(bindingId, "active-state", "Active State", "m_IsActive", "visible", syncActiveState, "step", now);
@@ -611,8 +579,8 @@ namespace GameCult.Brokkr.Editor
                     updatedAt = now
                 };
 
-                mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
-                mirror.PublishTimelineBindingAsync(binding).GetAwaiter().GetResult();
+                Mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
+                Mirror.PublishTimelineBindingAsync(binding).GetAwaiter().GetResult();
                 PublishSyncVar(bindingId, "timeline-frame", "Timeline Frame", "Timeline.time", "scene.frame_current", syncTimelineFrame, "linear", now);
                 PublishSyncVar(bindingId, "cinemachine-virtual-camera", "Cinemachine Camera", "CinemachineVirtualCamera", "camera", syncCinemachineCamera, "linear", now);
                 SetStatus($"Published Brokkr timeline sync binding: {binding.displayName}", MessageType.Info);
@@ -634,7 +602,7 @@ namespace GameCult.Brokkr.Editor
                     : adHocSyncVarBindingId.Trim();
                 var session = BuildSyncSession(now);
 
-                mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
+                Mirror.PublishSyncSessionAsync(session).GetAwaiter().GetResult();
                 PublishSyncVar(
                     bindingId,
                     string.IsNullOrWhiteSpace(adHocSyncVarKind) ? "custom-property" : adHocSyncVarKind.Trim(),
@@ -694,7 +662,7 @@ namespace GameCult.Brokkr.Editor
                 interpolation = interpolation,
                 updatedAt = updatedAt
             };
-            mirror.PublishSyncVarAsync(syncVar).GetAwaiter().GetResult();
+            Mirror.PublishSyncVarAsync(syncVar).GetAwaiter().GetResult();
         }
 
         private static string DefaultAuthorityForKind(string kind)
@@ -758,7 +726,6 @@ namespace GameCult.Brokkr.Editor
         {
             if (autoPublish)
             {
-                CaptureSnapshot();
                 PublishSnapshot();
             }
             else
@@ -772,25 +739,19 @@ namespace GameCult.Brokkr.Editor
             OnEditorSignal();
         }
 
+        // Display refresh only. The window executes nothing; BrokkrEditorService owns the drain.
         private void OnEditorUpdate()
         {
-            if (mirror != null && mirror.IsRunning)
+            if (!ReferenceEquals(lastSyncReceipt, BrokkrEditorService.LastSyncReceipt))
             {
-                PollSyncReceipts(true);
+                lastSyncReceipt = BrokkrEditorService.LastSyncReceipt;
+                Repaint();
             }
-
-            if (!autoPollCommands || EditorApplication.timeSinceStartup < nextPollAt)
-            {
-                return;
-            }
-
-            nextPollAt = EditorApplication.timeSinceStartup + 1.0;
-            PollAndExecuteCommand(true);
         }
 
         private void RequireMirror()
         {
-            if (mirror == null || !mirror.IsRunning)
+            if (!Mirror.IsRunning)
             {
                 throw new InvalidOperationException("Start the Brokkr CultMesh mirror first.");
             }

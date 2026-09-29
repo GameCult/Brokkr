@@ -26,6 +26,9 @@ Primary Eve surface id: `brokkr.eve.tool_broker.v0`
 - `gameobject.create`
 - `component.attach`
 - `component.property.write`
+- `editor.assets.refresh`
+- `editor.lifecycle.write`
+- `editor.view.capture`
 - `command.receipt.publish`
 - `eve.gui.publish`
 - `eve.tui.publish`
@@ -72,8 +75,16 @@ Primary sync documents:
 
 Operational commands:
 
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action readHost`
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action createGameObject --name Marker --local-position 0,1,0`
 - `brokkr-daemon sync-once --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp`
 - `brokkr-daemon sync-loop --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp --interval-ms 500`
+
+`brokkr-command` is a caller. Each invocation writes one intent through the
+directory store (every intent field has a `--kebab-case` option; `--view` and
+`--output` fill the capture fields), waits for the receipt, and exits 0 for
+`accepted`, 1 for any other status, and 2 for a usage error or a timeout. It
+never writes receipts, host snapshots or the agent-commands flag.
 
 `sync-loop` owns scheduling only. It repeatedly invokes the same sync decision
 primitive as `sync-once`, writes command intents and sync receipts through the
@@ -134,6 +145,11 @@ All Unity writes use `brokkr.unity.command_intent.v0` and receive
 - `createPrefabVariant`
 - `assignMaterial`
 - `createScriptableObject`
+- `refreshAssets`
+- `setEditorPlayState`
+- `setEditorPaused`
+- `captureEditorView`
+- `saveScene`
 
 Unity owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Unity executes recognized intents and publishes
@@ -149,6 +165,44 @@ optional instance name, and `parentObjectId` as the optional parent.
 destination prefab path.
 `createScriptableObject` uses `componentType` as the ScriptableObject type and
 `assetPath` as the destination asset path.
+`refreshAssets` forces an AssetDatabase refresh. `setEditorPlayState` and
+`setEditorPaused` take boolean `value`; the editor service restarts from
+`[InitializeOnLoad]` after the resulting domain reload and keeps draining.
+`captureEditorView` renders `viewKind` (`scene` or `game`) to a PNG at `width`
+by `height` (0 means the camera size, at most 8192). `outputPath` is a plain
+relative path ending in `.png`, resolved under `<project>/.brokkr/captures/`;
+anything else is denied. `saveScene` saves the open scenes.
+
+### Admission
+
+Before any intent runs, `BrokkrCommandPolicy` checks it against the project's
+allowed-action list (window field "Allowed Actions", per project). By default
+scene mutation and editor lifecycle actions are allowed; the asset-writing
+actions `createScriptableObject` and `createPrefabVariant`, and `saveScene`,
+are not, and an action the list does not name is denied. A denied intent gets a
+receipt with `status: denied` and the reason in `message`, so a refusal is as
+visible as an acceptance. `requestedBy` on the intent names the caller and is
+echoed on the receipt; admission never reads it. The window's buttons write
+intents like any other caller, so the operator and an agent pass the same gate.
+
+## Unity Command Transport
+
+Commands reach the editor through the project's directory store at
+`<project>/.brokkr/unity-editor.ccmp` (`.records/` beside it). There is no
+network listener: admission starts at filesystem permissions, and the editor sees
+a written intent on its next pull, about once a second.
+
+The editor executes intents only while the operator has enabled agent commands
+for that project (window toggle "Agent Commands"). The flag is off by default
+and installing the package never turns it on. The host snapshot carries it as
+`agentCommandsEnabled`, so a caller can see why nothing executes.
+
+A command id is single-use. Every writer mints a fresh `commandId` for each
+act, and a receipt at `unity/receipts/{commandId}` answers exactly that id.
+Once an id has a receipt, the editor never executes it again, whatever is
+later written under it: reusing an answered id is a caller defect, and its
+receipt is the answer that stands. A writer that repeats an intent mints a new
+id for each repetition.
 
 ## Blender Command Actions
 

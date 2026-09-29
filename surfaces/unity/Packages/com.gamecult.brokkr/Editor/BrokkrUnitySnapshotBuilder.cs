@@ -21,6 +21,9 @@ namespace GameCult.Brokkr.Editor
             "scene.tree.read",
             "selection.read",
             "asset.catalog.read",
+            "editor.assets.refresh",
+            "editor.lifecycle.write",
+            "editor.view.capture",
             "command.palette.read",
             "command.execute",
             "receipt.read"
@@ -41,6 +44,11 @@ namespace GameCult.Brokkr.Editor
                     .Select(item => item.name)
                     .ToArray(),
                 assetCount = AssetDatabase.GetAllAssetPaths().Length,
+                agentCommandsEnabled = BrokkrSettings.AgentCommandsEnabled,
+                isPlaying = EditorApplication.isPlaying,
+                isPaused = EditorApplication.isPaused,
+                isCompiling = EditorApplication.isCompiling,
+                isUpdating = EditorApplication.isUpdating,
                 capabilities = Capabilities,
                 sceneObjects = CaptureSceneObjects(),
                 assets = CaptureAssets()

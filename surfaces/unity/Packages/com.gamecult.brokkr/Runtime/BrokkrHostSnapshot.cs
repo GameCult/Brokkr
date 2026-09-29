@@ -23,6 +23,29 @@ namespace GameCult.Brokkr
         [Key(11)] public string[] capabilities = Array.Empty<string>();
         [Key(12)] public BrokkrGameObjectSnapshot[] sceneObjects = Array.Empty<BrokkrGameObjectSnapshot>();
         [Key(13)] public BrokkrAssetSnapshot[] assets = Array.Empty<BrokkrAssetSnapshot>();
+        [Key(14)] public bool isPlaying;
+        [Key(15)] public bool isPaused;
+        [Key(16)] public bool isCompiling;
+        [Key(17)] public bool isUpdating;
+        // False means the editor executes no agent commands: the operator has not enabled the sink.
+        [Key(18)] public bool agentCommandsEnabled;
+    }
+
+    // Written by the editor, into the store, when the operator enables the command sink. The token is also kept in
+    // the editor's own EditorPrefs; a store whose marker does not carry that token was not enabled by this editor,
+    // so nothing in it runs (BrokkrCommandDrain). That stops a stale "enabled" from authorizing a re-cloned or
+    // foreign store. It does not authenticate writers: anyone who can write .brokkr can write intents, and the
+    // Allowed Actions policy is what limits them. Restoring a backup, a git checkout, or a sync-conflict copy of
+    // this editor's own store carries a valid marker and can bring back intents that were already answered.
+    [CultDocument("brokkr.unity.sink_enabled", "brokkr.unity.sink_enabled.v0")]
+    [MessagePackObject]
+    [Serializable]
+    public sealed class BrokkrSinkEnabled
+    {
+        [Key(0)] public string schema = "gamecult.brokkr.sink_enabled.v0";
+        [Key(1)] public string token = "";
+        // Informational only; no decision reads it.
+        [Key(2)] public string enabledAt = "";
     }
 
     [CultDocument("brokkr.unity.snapshot_receipt", "brokkr.unity.snapshot_receipt.v0")]
@@ -109,6 +132,13 @@ namespace GameCult.Brokkr
         [Key(10)] public string localPosition = "";
         [Key(11)] public string localEulerAngles = "";
         [Key(12)] public string localScale = "";
+        // Editor view capture: viewKind is scene or game; outputPath is relative to .brokkr/captures (BrokkrCommandPolicy).
+        [Key(13)] public string viewKind = "";
+        [Key(14)] public string outputPath = "";
+        [Key(15)] public int width;
+        [Key(16)] public int height;
+        // Who asked: a caller's name for itself, echoed on the receipt. Informational; admission never reads it.
+        [Key(17)] public string requestedBy = "";
     }
 
     [MessagePackObject]
@@ -129,5 +159,6 @@ namespace GameCult.Brokkr
         [Key(3)] public string message = "";
         [Key(4)] public string objectId = "";
         [Key(5)] public string observedAt = "";
+        [Key(6)] public string requestedBy = "";
     }
 }

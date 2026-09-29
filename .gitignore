@@ -13,3 +13,5 @@ Logs/
 UserSettings/
 __pycache__/
 *.pyc
+bin/
+obj/

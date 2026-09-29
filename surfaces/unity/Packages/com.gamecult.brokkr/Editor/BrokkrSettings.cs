@@ -1,4 +1,6 @@
+using System.Linq;
 using UnityEditor;
+using UnityEngine;
 
 namespace GameCult.Brokkr.Editor
 {
@@ -20,16 +22,36 @@ namespace GameCult.Brokkr.Editor
             set => EditorPrefs.SetBool("GameCult.Brokkr.AutoPublish", value);
         }
 
-        internal static bool AutoPollCommands
+        // Whether this editor executes intents that agents write into .brokkr. Off until the operator turns it on.
+        // EditorPrefs is shared by every project on the machine, so the flag keys on the project.
+        //
+        // What is stored is a token minted at enable time. The same token is written into the project's store as the
+        // enable marker (BrokkrSinkEnabled); the sink runs only while the store still carries it. A re-clone or a
+        // copied .brokkr has no such marker, so an old "enabled" left in EditorPrefs authorizes nothing.
+        internal static string AgentCommandsToken => EditorPrefs.GetString(ProjectKey("AgentCommandsToken"), "");
+
+        internal static bool AgentCommandsEnabled => AgentCommandsToken.Length > 0;
+
+        internal static void EnableAgentCommands(string token) =>
+            EditorPrefs.SetString(ProjectKey("AgentCommandsToken"), token);
+
+        internal static void DisableAgentCommands() => EditorPrefs.DeleteKey(ProjectKey("AgentCommandsToken"));
+
+        private static string ProjectKey(string name) => $"GameCult.Brokkr.{name}.{Application.dataPath}";
+
+        // The actions this project lets an agent run (comma separated). Asset-writing actions and saveScene are
+        // absent until the operator adds them.
+        internal static string[] AllowedAgentActions
         {
-            get => EditorPrefs.GetBool("GameCult.Brokkr.AutoPollCommands", false);
-            set => EditorPrefs.SetBool("GameCult.Brokkr.AutoPollCommands", value);
+            get => BrokkrCommandPolicy.ParseAllowedActions(EditorPrefs.GetString(
+                ProjectKey("AllowedAgentActions"), string.Join(",", BrokkrCommandPolicy.DefaultAllowedActions))).ToArray();
+            set => EditorPrefs.SetString(ProjectKey("AllowedAgentActions"), string.Join(",", value));
         }
 
         internal static string CultMeshCachePath
         {
-            get => EditorPrefs.GetString("GameCult.Brokkr.CultMeshCachePath", BrokkrCultMeshMirror.DefaultCachePath());
-            set => EditorPrefs.SetString("GameCult.Brokkr.CultMeshCachePath", value);
+            get => EditorPrefs.GetString(ProjectKey("CultMeshCachePath"), BrokkrCultMeshMirror.DefaultCachePath());
+            set => EditorPrefs.SetString(ProjectKey("CultMeshCachePath"), value);
         }
 
         internal static string SyncSessionId

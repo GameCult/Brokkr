@@ -32,6 +32,8 @@ broker.
 - `surfaces/blender/brokkr_bridge`: Blender add-on target backed by
   CultLib's Python CultMesh node/server, with optional debug export/import
   probes.
+- `brokkr-command`: .NET CLI that writes one Unity command intent through the
+  project's directory store and reports the editor's receipt (`docs/provider-contract.md`).
 - `brokkr-daemon`: Rust CLI that emits Brokkr's provider advertisement and
   command policy and runs the Unity/Blender sync pass.
 
