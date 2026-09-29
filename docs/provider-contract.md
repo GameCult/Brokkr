@@ -26,6 +26,9 @@ Primary Eve surface id: `brokkr.eve.tool_broker.v0`
 - `gameobject.create`
 - `component.attach`
 - `component.property.write`
+- `editor.assets.refresh`
+- `editor.lifecycle.write`
+- `editor.view.capture`
 - `command.receipt.publish`
 - `eve.gui.publish`
 - `eve.tui.publish`

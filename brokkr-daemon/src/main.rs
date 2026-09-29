@@ -222,6 +222,9 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "gameobject.create",
                     "component.attach",
                     "component.property.write",
+                    "editor.assets.refresh",
+                    "editor.lifecycle.write",
+                    "editor.view.capture",
                     "sync.session.publish",
                     "sync.object.bind",
                     "sync.var.publish",
@@ -2003,6 +2006,9 @@ mod tests {
                 .contains(&"asset.scriptable_object.create")
         );
         assert!(unity.capabilities.contains(&"material.assign"));
+        assert!(unity.capabilities.contains(&"editor.assets.refresh"));
+        assert!(unity.capabilities.contains(&"editor.lifecycle.write"));
+        assert!(unity.capabilities.contains(&"editor.view.capture"));
         assert!(!blender.capabilities.contains(&"quest.input.consume"));
         assert!(blender.capabilities.contains(&"object.graph.read"));
         assert!(blender.capabilities.contains(&"object.transform.write"));
