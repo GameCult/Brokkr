@@ -341,17 +341,14 @@ namespace GameCult.Brokkr.Editor
             SetStatus("Captured Unity editor host snapshot.", MessageType.Info);
         }
 
+        // Asks the editor service to capture and publish a fresh snapshot. The window never writes
+        // unity/host/current itself: a snapshot it captured earlier could carry stale flags.
         private void PublishSnapshot()
         {
             try
             {
-                if (lastSnapshot == null)
-                {
-                    lastSnapshot = BrokkrUnitySnapshotBuilder.Capture();
-                }
-
                 RequireMirror();
-                Mirror.PublishSnapshotAsync(lastSnapshot).GetAwaiter().GetResult();
+                lastSnapshot = BrokkrEditorService.PublishSnapshotAsync().GetAwaiter().GetResult();
                 SetStatus($"Mirrored Unity snapshot: {lastSnapshot.observedAt}", MessageType.Info);
             }
             catch (Exception error)
@@ -729,7 +726,6 @@ namespace GameCult.Brokkr.Editor
         {
             if (autoPublish)
             {
-                CaptureSnapshot();
                 PublishSnapshot();
             }
             else
