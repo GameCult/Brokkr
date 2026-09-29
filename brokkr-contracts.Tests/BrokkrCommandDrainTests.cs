@@ -169,13 +169,13 @@ public sealed class BrokkrCommandDrainTests
     }
 
     [Fact]
-    public async Task FailingFinalFlushNeverRerunsTheIntentEvenAfterARestart()
+    public async Task FailingFinalFlushNeverRerunsTheIntentAndTheCommittedVerdictSurvivesARestart()
     {
         using var project = new ScratchProject();
         var editor = await EditorProbe.StartAsync(project.StorePath);
         await project.WriteCommandAsync("unlucky");
         var flushes = 0;
-        editor.FailFlush = () => ++flushes == 2; // the marker's flush lands, the verdict's does not
+        editor.FailFlush = () => ++flushes == 2; // the verdict's fsync fails after its commit landed
         await Assert.ThrowsAsync<IOException>(editor.TickAsync);
         Assert.Single(editor.Executed);
         editor.Dispose(); // the editor dies here, before anything else could flush the verdict
@@ -185,7 +185,7 @@ public sealed class BrokkrCommandDrainTests
             await restarted.TickAsync();
 
         Assert.Empty(restarted.Executed);
-        Assert.Equal("interrupted", StatusOf(project, "unlucky"));
+        Assert.Equal("accepted", StatusOf(project, "unlucky"));
     }
 
     [Theory]
@@ -231,7 +231,7 @@ public sealed class BrokkrCommandDrainTests
     }
 
     [Fact]
-    public async Task AStaleFloodExpiresInOneFlushAndTheFreshIntentRunsInTheFirstTick()
+    public async Task AStaleFloodExpiresInOneCommitAndTheFreshIntentRunsInTheFirstTick()
     {
         const int stale = 2000;
         using var project = new ScratchProject();
@@ -245,7 +245,7 @@ public sealed class BrokkrCommandDrainTests
         var enableTime = clock.Elapsed;
         output.WriteLine($"enable: {expired} expired in {enableTime.TotalMilliseconds:F0} ms, {editor.Flushes - flushesBefore} flush(es)");
         Assert.Equal(stale, expired);
-        Assert.Equal(1, editor.Flushes - flushesBefore);
+        Assert.Equal(2, editor.Flushes - flushesBefore); // the editor's own state first, then the commit: never one per receipt
         Assert.True(enableTime < EnableBudget, $"enable took {enableTime}");
 
         await project.WriteCommandAsync("fresh");
