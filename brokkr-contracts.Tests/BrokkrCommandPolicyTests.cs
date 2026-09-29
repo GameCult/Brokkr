@@ -88,6 +88,7 @@ public sealed class BrokkrCommandPolicyTests
     [InlineData("../../x.png")]
     [InlineData("..\\x.png")]
     [InlineData("a/../../x.png")]
+    [InlineData("a/../b.png")]
     [InlineData("shot.png:stream")]
     [InlineData("x.txt")]
     [InlineData("x.cs")]

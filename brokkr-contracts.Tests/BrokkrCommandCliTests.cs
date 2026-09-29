@@ -131,6 +131,34 @@ public sealed class BrokkrCommandCliTests
     }
 
     [Fact]
+    public async Task ReadHostReportsTheSinkOff()
+    {
+        using var project = new ScratchProject();
+        using var editor = await EditorProbe.StartAsync(project.StorePath);
+        editor.AgentCommandsEnabled = false;
+        await editor.TickAsync();
+
+        var result = await RunAsync("--unity-cache", project.StorePath, "--action", "readHost");
+
+        Assert.Equal(0, result.Exit);
+        Assert.Contains("agent-commands: off", result.Out);
+    }
+
+    [Fact]
+    public async Task TimeoutSaysWhenTheEditorReportsTheSinkOff()
+    {
+        using var project = new ScratchProject();
+        using var editor = await EditorProbe.StartAsync(project.StorePath);
+        editor.AgentCommandsEnabled = false;
+        await editor.TickAsync();
+        editor.Dispose();
+
+        var result = await RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", "600");
+
+        Assert.Equal(2, result.Exit);
+        Assert.Contains("agent commands off", result.Error);
+    }
+    [Fact]
     public async Task ReadHostShowsWhetherTheSinkIsEnabled()
     {
         using var project = new ScratchProject();

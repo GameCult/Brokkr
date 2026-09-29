@@ -20,6 +20,9 @@ internal sealed class EditorProbe : IDisposable
     // What the "editor" answers with. Real Unity answers accepted or failed per the executor.
     internal Func<BrokkrUnityCommand, string> StatusFor { get; set; } = _ => "accepted";
 
+    // What the host snapshot says about the sink; the real editor reports the operator's toggle.
+    internal bool AgentCommandsEnabled { get; set; } = true;
+
     private EditorProbe(CultMeshNode node)
     {
         this.node = node;
@@ -59,7 +62,7 @@ internal sealed class EditorProbe : IDisposable
 
         await node.Database.PutAsync(
             new CultRecordKey("unity/host/current"),
-            new BrokkrHostSnapshot { observedAt = DateTime.UtcNow.ToString("O"), projectPath = "probe", agentCommandsEnabled = true });
+            new BrokkrHostSnapshot { observedAt = DateTime.UtcNow.ToString("O"), projectPath = "probe", agentCommandsEnabled = AgentCommandsEnabled });
         await node.FlushAsync(soft: true);
     }
 
