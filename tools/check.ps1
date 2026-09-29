@@ -48,21 +48,14 @@ try {
     Assert-Contains $syncContractText "timeline-frame" "sync contract"
     Assert-Contains $syncContractText "cinemachine-virtual-camera" "sync contract"
 
-    $pluginRoot = Join-Path (Get-Location) "surfaces\unity\Packages\com.gamecult.brokkr\Plugins\CultMesh"
-    $requiredDlls = @(
-        "GameCult.Caching.dll",
-        "GameCult.Caching.MessagePack.dll",
-        "GameCult.Mesh.dll",
-        "GameCult.Networking.dll",
-        "MessagePack.dll",
-        "R3.dll"
-    )
-
-    foreach ($dll in $requiredDlls) {
-        $path = Join-Path $pluginRoot $dll
-        if (-not (Test-Path $path)) {
-            throw "Missing vendored CultMesh Unity dependency: $path"
-        }
+    $unityPackage = Join-Path (Get-Location) "surfaces\unity\Packages\com.gamecult.brokkr"
+    $vendoredDlls = @(Get-ChildItem -Path $unityPackage -Recurse -Filter "*.dll" -File)
+    if ($vendoredDlls.Count -gt 0) {
+        throw "The Brokkr Unity package must not ship assemblies; org.gamecult.cultlib owns them: $($vendoredDlls.FullName -join ', ')"
+    }
+    $unityManifest = Get-Content (Join-Path $unityPackage "package.json") -Raw | ConvertFrom-Json
+    if (-not $unityManifest.dependencies.PSObject.Properties["org.gamecult.cultlib"]) {
+        throw "surfaces/unity package.json must depend on org.gamecult.cultlib."
     }
 
     $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
