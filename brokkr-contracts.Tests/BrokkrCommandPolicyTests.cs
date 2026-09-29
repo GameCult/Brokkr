@@ -90,6 +90,8 @@ public sealed class BrokkrCommandPolicyTests
     [InlineData("a/../../x.png")]
     [InlineData("a/../b.png")]
     [InlineData("shot.png:stream")]
+    [InlineData(":x.png")]
+    [InlineData("0000x.png")]
     [InlineData("x.txt")]
     [InlineData("x.cs")]
     [InlineData("noextension")]
@@ -102,6 +104,18 @@ public sealed class BrokkrCommandPolicyTests
         Assert.False(admission.Allowed);
         Assert.NotEmpty(admission.Reason);
         Assert.Throws<ArgumentException>(() => BrokkrCommandPolicy.ResolveCapturePath(ProjectRoot, outputPath));
+    }
+
+    [Fact]
+    public void CaptureDirectoryIsBrokkrCapturesUnderTheProjectRoot()
+    {
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(ProjectRoot, ".brokkr", "captures")),
+            BrokkrCommandPolicy.CaptureDirectory(ProjectRoot));
+        Assert.Equal(
+            Path.Combine(BrokkrCommandPolicy.CaptureDirectory(ProjectRoot), "shot.png"),
+            BrokkrCommandPolicy.ResolveCapturePath(ProjectRoot, "shot.png"));
+        Assert.EndsWith(Path.Combine(".brokkr", "captures"), BrokkrCommandPolicy.CaptureDirectory(ProjectRoot));
     }
 
     [Theory]
