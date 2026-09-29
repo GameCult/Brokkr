@@ -14,6 +14,22 @@ Commits nothing, switches no tree. Builds ran on Yggdrasil only. Unity and Windo
 
 ---
 
+
+## Rulings (operator, 2026-09-30)
+
+- **F1: unpark agent access.** Operator: "me agreeing to do the Editor shenanigans then was not a
+  permanent commitment to always do all the editor shenanigans". The maintenance cuts land first, then
+  the agent-access cuts.
+- **F2: re-land as fresh commits (Self's default).** No merge, so 7.5 MB of DLL blobs never enter
+  `main`'s history.
+- **F3: park the prefab CDN pipeline** at `parked/brokkr-prefab-cdn`, with a note.
+- **F4 A: file transport.** Commands travel through the directory store at `<project>/.brokkr/`. There
+  is no network listener.
+- **F5 A: the command sink is off by default,** with one visible toggle per project that also shows in
+  the host snapshot.
+- **F6 A: command ids are single-use.** Each writer mints a fresh id, and sync puts a pass or content
+  hash into the id.
+
 ## 0. The split the operator has to see first
 
 The donor contains **four** things, not three. The operator's adoption covered "DLL refresh, editor command control, durable commands after external pulls". It did not name the fourth: a prefab CDN pipeline that shipped inside commit `8d5b580`. That commit also carries the auto-starting editor bridge, so it cannot be taken whole under either heading.

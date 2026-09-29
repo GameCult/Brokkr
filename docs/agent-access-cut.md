@@ -1,3 +1,7 @@
+> **History (2026-09-30).** Superseded by `docs/brokkr-adoption-cut.md`. The operator unparked agent
+> access, and the adoption map re-derives these cuts against the Codex donor. Read that map; this one is
+> kept only for its rejected paths.
+
 # Brokkr Agent Access: Cut Map
 
 > **Parked (operator, 2026-09-18): "screw it, I'll do any editor shenanigans we need for
