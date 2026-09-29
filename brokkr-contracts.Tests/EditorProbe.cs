@@ -45,8 +45,11 @@ internal sealed class EditorProbe : IDisposable
     internal async Task TickAsync()
     {
         await ledger.PullAsync();
+        var drained = 0;
         while (ledger.TryNextPending(out var command))
         {
+            if (++drained > 10000)
+                throw new InvalidOperationException("The ledger keeps offering answered intents; a regression would otherwise hang the suite.");
             Executed.Add(command);
             await node.Database.PutAsync(
                 BrokkrCommandLedger.ReceiptKey(command.commandId),
