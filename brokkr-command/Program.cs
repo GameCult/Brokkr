@@ -105,9 +105,15 @@ internal static class Cli
 
     private static async Task<int> WriteIntentAsync(CultCache cache, string action, Dictionary<string, string> options)
     {
+        var waitMilliseconds = options.TryGetValue("--wait-ms", out var wait) ? Integer("--wait-ms", wait) : 10000;
+        // The editor keeps every receipt for at least BrokkrCommandDrain.ReceiptFloor, which is what makes a wait this
+        // long safe: the receipt a caller waits on cannot be pruned before it reads it.
+        if (waitMilliseconds > BrokkrCommandDrain.MaxCallerWait.TotalMilliseconds)
+            throw new ArgumentException($"--wait-ms may not exceed {BrokkrCommandDrain.MaxCallerWait.TotalMilliseconds:F0} (the editor keeps receipts for at least {BrokkrCommandDrain.ReceiptFloor.TotalMinutes:F0} minutes).");
         // A command id is single-use, so every invocation is a new act with a new id. --command-id exists for callers
         // that need to name their own; one that already has a receipt is refused, because that receipt answered an
-        // earlier act and would be reported as the answer to this one. The check and the write are two steps, so two\n        // callers naming the same new id in the same instant can still collide; ids are minted, and that is a caller defect.
+        // earlier act and would be reported as the answer to this one. The check and the write are two steps, so two
+        // callers naming the same new id in the same instant can still collide; ids are minted, and that is a caller defect.
         var named = options.TryGetValue("--command-id", out var commandId) && !string.IsNullOrWhiteSpace(commandId);
         if (named)
         {
@@ -129,7 +135,7 @@ internal static class Cli
         await cache.AddAsync(command, new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey(command.commandId)));
         await cache.FlushAsync();
 
-        var waitMilliseconds = options.TryGetValue("--wait-ms", out var wait) ? Integer("--wait-ms", wait) : 10000;
+
         if (waitMilliseconds <= 0)
         {
             Console.WriteLine(command.commandId);

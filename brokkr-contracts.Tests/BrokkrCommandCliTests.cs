@@ -317,4 +317,17 @@ public sealed class BrokkrCommandCliTests
         Assert.DoesNotContain("Timed out", result.Error);
         Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
+
+    [Fact]
+    public async Task AWaitLongerThanTheReceiptFloorAllowsIsRefusedBeforeAnythingIsWritten()
+    {
+        using var project = new ScratchProject();
+        var tooLong = (BrokkrCommandDrain.MaxCallerWait.TotalMilliseconds + 1).ToString("F0");
+
+        var result = await RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", tooLong);
+
+        Assert.Equal(2, result.Exit);
+        Assert.Contains("--wait-ms may not exceed", result.Error);
+        Assert.Empty(StoredIntents(project));
+    }
 }

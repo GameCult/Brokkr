@@ -158,4 +158,28 @@ public sealed class BrokkrCommandLedgerTests
         using var audit = project.OpenCache();
         Assert.Equal(ids.Length, audit.AllStoredDocuments.Count(entry => entry.Document is BrokkrUnityCommandReceipt));
     }
+
+    [Fact]
+    public async Task DocumentUnderAKeyItsIdDoesNotNameIsNeverPending()
+    {
+        // One body id under two keys must not run twice, and a receipt under the wrong key retires nothing.
+        using var project = new ScratchProject();
+        using (var writer = project.OpenCache())
+        {
+            var command = new BrokkrUnityCommand { commandId = "dup", action = "refreshAssets" };
+            await writer.AddAsync(command, new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey("dup")));
+            await writer.AddAsync(new BrokkrUnityCommand { commandId = "dup", action = "refreshAssets" },
+                new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey("other")));
+            await writer.AddAsync(new BrokkrUnityCommand { commandId = "victim", action = "refreshAssets" },
+                new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey("victim")));
+            await writer.AddAsync(new BrokkrUnityCommandReceipt { commandId = "victim", status = "accepted" },
+                new CultRecordHandle<BrokkrUnityCommandReceipt>(new CultRecordKey("unity/receipts/elsewhere")));
+            await writer.FlushAsync();
+        }
+
+        using var editor = project.OpenCache();
+        var pending = new BrokkrCommandLedger(editor).Pending(int.MaxValue);
+
+        Assert.Equal(new[] { "dup", "victim" }, pending.Select(command => command.commandId).OrderBy(id => id));
+    }
 }

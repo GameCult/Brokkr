@@ -33,7 +33,10 @@ namespace GameCult.Brokkr
 
     // Written by the editor, into the store, when the operator enables the command sink. The token is also kept in
     // the editor's own EditorPrefs; a store whose marker does not carry that token was not enabled by this editor,
-    // so nothing in it runs (BrokkrCommandDrain). A caller that can only write intents cannot forge it.
+    // so nothing in it runs (BrokkrCommandDrain). That stops a stale "enabled" from authorizing a re-cloned or
+    // foreign store. It does not authenticate writers: anyone who can write .brokkr can write intents, and the
+    // Allowed Actions policy is what limits them. Restoring a backup, a git checkout, or a sync-conflict copy of
+    // this editor's own store carries a valid marker and can bring back intents that were already answered.
     [CultDocument("brokkr.unity.sink_enabled", "brokkr.unity.sink_enabled.v0")]
     [MessagePackObject]
     [Serializable]

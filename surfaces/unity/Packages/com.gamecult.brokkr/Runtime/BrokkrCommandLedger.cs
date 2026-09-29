@@ -8,7 +8,7 @@ using GameCult.Caching;
 namespace GameCult.Brokkr
 {
     // Decides which Unity command intents still await execution. A command id is single-use: any receipt that
-    // answers an id retires it for good, whatever is later written under that id. The ledger holds no state of its
+    // answers an id retires it for as long as the receipt exists (BrokkrCommandDrain prunes old ones), whatever is later written under that id. The ledger holds no state of its
     // own; the answer is derived from the cache on every call, so there is no second copy that could drift.
     public sealed class BrokkrCommandLedger
     {
@@ -40,25 +40,28 @@ namespace GameCult.Brokkr
         }
 
         // Up to max unanswered intents, oldest first, from one pass over the store. Stored-at only orders them; no
-        // decision anywhere compares it with a clock.
+        // decision anywhere compares it with a clock. A document counts only under the key its own id names, so an
+        // intent cannot run twice by being stored under two keys, and a receipt cannot retire another key's intent.
         public BrokkrUnityCommand[] Pending(int max)
         {
             var stored = cache.AllStoredDocuments.ToArray();
             var answered = new HashSet<string>(
-                stored.Select(entry => entry.Document).OfType<BrokkrUnityCommandReceipt>()
-                    .Select(receipt => receipt.commandId)
-                    .Where(id => !string.IsNullOrWhiteSpace(id)),
+                stored.Where(entry => entry.Document is BrokkrUnityCommandReceipt receipt
+                                      && !string.IsNullOrWhiteSpace(receipt.commandId)
+                                      && entry.Key.Value == ReceiptKeyPrefix + receipt.commandId)
+                    .Select(entry => ((BrokkrUnityCommandReceipt)entry.Document).commandId),
                 StringComparer.Ordinal);
 
             return stored
-                .Where(entry => entry.Document is BrokkrUnityCommand)
+                .Where(entry => entry.Document is BrokkrUnityCommand candidate
+                                && !string.IsNullOrWhiteSpace(candidate.commandId)
+                                && entry.Key.Value == CommandKeyPrefix + candidate.commandId
+                                && !answered.Contains(candidate.commandId))
                 .OrderBy(entry => entry.StoredAt, StringComparer.Ordinal)
                 .Select(entry => (BrokkrUnityCommand)entry.Document)
-                .Where(candidate => !string.IsNullOrWhiteSpace(candidate.commandId) && !answered.Contains(candidate.commandId))
                 .Take(max)
                 .ToArray();
         }
-
         // True when the store holds the enable marker for this token (see BrokkrCommandDrain).
         public bool SinkAuthorized(string token) =>
             !string.IsNullOrWhiteSpace(token)
@@ -75,19 +78,29 @@ namespace GameCult.Brokkr
                                   && !string.IsNullOrWhiteSpace(receipt.commandId))
                 .ToArray();
 
-        // The ids of the oldest answered intents beyond the newest keep receipts, at most max. Receipts are ordered by
-        // their own stored-at, all minted by the editor, so one clock orders them. An attempt in flight is never listed.
-        public string[] Prunable(int keep, int max)
+        // The ids of the oldest answered intents beyond the newest keep receipts, at most max, and only those whose
+        // receipt was stored at or before notAfter (see BrokkrCommandDrain.ReceiptFloor). Receipts are ordered by
+        // their own stored-at, all minted by the editor, so one clock orders and ages them. An attempt in flight is
+        // never listed.
+        public string[] Prunable(int keep, int max, DateTimeOffset notAfter)
         {
             var receipts = cache.AllStoredDocuments
                 .Where(entry => entry.Document is BrokkrUnityCommandReceipt receipt
                                 && !string.IsNullOrWhiteSpace(receipt.commandId)
+                                && entry.Key.Value == ReceiptKeyPrefix + receipt.commandId
                                 && !string.Equals(receipt.status, BrokkrCommandDrain.AttemptedStatus, StringComparison.Ordinal))
                 .OrderBy(entry => entry.StoredAt, StringComparer.Ordinal)
-                .Select(entry => ((BrokkrUnityCommandReceipt)entry.Document).commandId)
                 .ToArray();
             var excess = receipts.Length - keep;
-            return excess <= 0 ? Array.Empty<string>() : receipts.Take(Math.Min(excess, max)).ToArray();
+            return excess <= 0
+                ? Array.Empty<string>()
+                : receipts.Take(excess)
+                    .TakeWhile(entry => !DateTimeOffset.TryParse(entry.StoredAt, System.Globalization.CultureInfo.InvariantCulture,
+                                            System.Globalization.DateTimeStyles.RoundtripKind, out var stored)
+                                        || stored <= notAfter)
+                    .Take(max)
+                    .Select(entry => ((BrokkrUnityCommandReceipt)entry.Document).commandId)
+                    .ToArray();
         }
     }
 }

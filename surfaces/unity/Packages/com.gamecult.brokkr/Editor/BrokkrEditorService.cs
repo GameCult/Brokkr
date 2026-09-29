@@ -74,7 +74,6 @@ namespace GameCult.Brokkr.Editor
                     throw new InvalidOperationException("The Brokkr mirror did not start; the sink stays off.");
                 }
 
-                await MirrorInstance.PullExternalUpdatesAsync();
                 var token = Guid.NewGuid().ToString("N");
                 var expired = await NewDrain().EnableAsync(token);
                 BrokkrSettings.EnableAgentCommands(token);
@@ -156,7 +155,7 @@ namespace GameCult.Brokkr.Editor
                 MirrorInstance.Ledger,
                 new BrokkrCommandPolicy(projectRoot, BrokkrSettings.AllowedAgentActions),
                 BrokkrUnityCommandExecutor.Execute,
-                MirrorInstance);
+                MirrorInstance.Store);
         }
     }
 }

@@ -250,22 +250,34 @@ public sealed class BrokkrCommandDrainTests
 
         await project.WriteCommandAsync("fresh");
         var slowest = TimeSpan.Zero;
-        var ticks = 0;
-        do
+        for (var tick = 1; tick <= 4; tick++)
         {
             clock.Restart();
             await editor.TickAsync();
             slowest = clock.Elapsed > slowest ? clock.Elapsed : slowest;
-            output.WriteLine($"tick {++ticks}: {clock.Elapsed.TotalMilliseconds:F0} ms, receipts kept {Receipts(project).Length}");
-            if (ticks == 1)
+            output.WriteLine($"tick {tick}: {clock.Elapsed.TotalMilliseconds:F0} ms");
+            if (tick == 1)
                 Assert.Equal(new[] { "fresh" }, editor.Executed.Select(command => command.commandId));
         }
-        while (Receipts(project).Length > BrokkrCommandDrain.RetainedReceipts && ticks < 40);
+
+        // Every receipt is younger than the retention floor, so none is pruned however far over the count: a caller
+        // waiting on an expired receipt still reads it.
+        Assert.Equal(stale + 1, Receipts(project).Length);
+
+        editor.ClockSkew = BrokkrCommandDrain.ReceiptFloor + TimeSpan.FromMinutes(1);
+        var ticks = 0;
+        while (Receipts(project).Length > BrokkrCommandDrain.RetainedReceipts && ticks < 40)
+        {
+            clock.Restart();
+            await editor.TickAsync();
+            slowest = clock.Elapsed > slowest ? clock.Elapsed : slowest;
+            output.WriteLine($"aged tick {++ticks}: {clock.Elapsed.TotalMilliseconds:F0} ms");
+        }
 
         Assert.True(slowest < TickBudget, $"slowest tick took {slowest}");
         Assert.Equal(new[] { "fresh" }, editor.Executed.Select(command => command.commandId));
         Assert.Equal("accepted", StatusOf(project, "fresh"));
-        // Receipts are bounded, and an intent goes with its receipt: nothing is left to run again.
+        // Receipts are bounded once they age, and an intent goes with its receipt: nothing is left to run again.
         using var audit = project.OpenCache();
         var documents = audit.AllStoredDocuments.Select(entry => entry.Document).ToArray();
         Assert.Equal(BrokkrCommandDrain.RetainedReceipts, documents.OfType<BrokkrUnityCommandReceipt>().Count());
@@ -273,6 +285,67 @@ public sealed class BrokkrCommandDrainTests
         Assert.False(new BrokkrCommandLedger(audit).TryNextPending(out _));
     }
 
+    [Fact]
+    public async Task AnIntentLandingBetweenTheEnablesPullAndItsCommitIsExpiredNotRun()
+    {
+        using var project = new ScratchProject();
+        using var editor = await EditorProbe.StartAsync(project.StorePath);
+        editor.DisableSink();
+        await project.WriteCommandAsync("waiting");
+        editor.BeforeEnableCommit = attempt =>
+        {
+            if (attempt == 1)
+                project.WriteCommandAsync("racer").GetAwaiter().GetResult();
+        };
+
+        var expired = await editor.EnableSinkAsync();
+        await editor.TickAsync();
+        await editor.TickAsync();
+
+        Assert.Equal(2, editor.EnableAttempts);
+        Assert.Equal(2, expired);
+        Assert.Empty(editor.Executed);
+        Assert.Equal("expired", StatusOf(project, "racer"));
+        Assert.Equal("expired", StatusOf(project, "waiting"));
+    }
+
+    [Fact]
+    public async Task AWriterThatNeverLetsTheStoreSettleMakesTheEnableFailAndLeavesTheSinkOff()
+    {
+        using var project = new ScratchProject();
+        using var editor = await EditorProbe.StartAsync(project.StorePath);
+        editor.DisableSink();
+        editor.BeforeEnableCommit = attempt => project.WriteCommandAsync($"stream-{attempt}").GetAwaiter().GetResult();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(editor.EnableSinkAsync);
+
+        Assert.Contains("continuously", error.Message);
+        Assert.Equal(BrokkrCommandDrain.MaxEnableAttempts, editor.EnableAttempts);
+        Assert.False(editor.AgentCommandsEnabled);
+        editor.BeforeEnableCommit = null;
+        await editor.TickAsync();
+        Assert.Empty(editor.Executed);
+        Assert.Empty(Receipts(project));
+    }
+
+    [Fact]
+    public async Task AWriterThatStopsLetsTheEnableConvergeAndExpireEverythingItWrote()
+    {
+        using var project = new ScratchProject();
+        using var editor = await EditorProbe.StartAsync(project.StorePath);
+        editor.DisableSink();
+        editor.BeforeEnableCommit = attempt =>
+        {
+            if (attempt <= 3)
+                project.WriteCommandAsync($"stream-{attempt}").GetAwaiter().GetResult();
+        };
+
+        Assert.Equal(3, await editor.EnableSinkAsync());
+        await editor.TickAsync();
+
+        Assert.Equal(4, editor.EnableAttempts);
+        Assert.Empty(editor.Executed);
+    }
     [Fact]
     public async Task DisallowedActionIsDeniedAndNeverExecuted()
     {

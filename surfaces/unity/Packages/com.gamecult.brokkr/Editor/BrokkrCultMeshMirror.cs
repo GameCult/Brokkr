@@ -12,9 +12,8 @@ using UnityEngine;
 namespace GameCult.Brokkr.Editor
 {
     // The one open handle on the project's directory store. BrokkrEditorService owns the only instance; the window
-    // publishes through it and never opens the store itself. It is also the drain's IBrokkrCommandStore: puts and
-    // deletes stage, and FlushAsync is the only fsync.
-    internal sealed class BrokkrCultMeshMirror : IDisposable, IBrokkrCommandStore
+    // publishes through it and never opens the store itself.
+    internal sealed class BrokkrCultMeshMirror : IDisposable
     {
         private readonly Queue<BrokkrSyncReceipt> syncReceiptQueue = new();
         private CultMeshNode node;
@@ -23,6 +22,11 @@ namespace GameCult.Brokkr.Editor
         internal bool IsRunning => node != null;
         internal string CachePath { get; private set; } = "";
         internal BrokkrCommandLedger Ledger { get; private set; }
+
+        // Every write the editor makes to the command lane (receipts, the enable, the prune) is one commit through
+        // this store, the same class the scenario harness runs. Snapshots, sync documents and the window's own
+        // intents still go through Database.PutAsync.
+        internal BrokkrCommandStore Store { get; private set; }
 
         internal async Task StartAsync(string cachePath)
         {
@@ -43,13 +47,15 @@ namespace GameCult.Brokkr.Editor
                 {
                     UseDirectoryStore = true
                 },
-                EnableDurableShardLogs = true,
+                // No server and no reader of the shard log, so it would only add a log write to every change.
+                EnableDurableShardLogs = false,
                 DatabaseOptions = new CultNetDatabaseOptions
                 {
                     RuntimeId = "brokkr-unity-editor"
                 }
             });
             Ledger = new BrokkrCommandLedger(node.Cache);
+            Store = new BrokkrCommandStore(node.Cache);
 
             syncReceiptSubscription = node.Database
                 .Watch<BrokkrSyncReceipt>()
@@ -75,60 +81,6 @@ namespace GameCult.Brokkr.Editor
             await node.FlushAsync(soft: true);
         }
 
-        // The receipt is the only proof an intent ran, and it is keyed by the intent it answers.
-        public Task PutReceiptAsync(BrokkrUnityCommandReceipt receipt)
-        {
-            RequireRunning();
-            if (string.IsNullOrWhiteSpace(receipt.commandId))
-            {
-                throw new ArgumentException("A receipt must name the command it answers.", nameof(receipt));
-            }
-
-            return node.Database.PutAsync(BrokkrCommandLedger.ReceiptKey(receipt.commandId), receipt);
-        }
-
-        public Task DeleteReceiptAsync(string commandId)
-        {
-            RequireRunning();
-            return node.Database.DeleteAsync<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(commandId));
-        }
-
-        // The batch methods commit through the cache directly. Database.PutAsync appends a mutation-log entry per
-        // record, which is what made 2000 expiries cost seconds; nothing here is replicated (no listener), and the
-        // ledger and the CLI both read the cache and the store.
-        public Task CommitEnableAsync(BrokkrUnityCommandReceipt[] expired, BrokkrSinkEnabled marker)
-        {
-            RequireRunning();
-            var committed = node.Cache.Commit(batch =>
-            {
-                foreach (var receipt in expired)
-                {
-                    batch.Upsert(receipt, new CultRecordHandle<BrokkrUnityCommandReceipt>(BrokkrCommandLedger.ReceiptKey(receipt.commandId)));
-                }
-
-                batch.Upsert(marker, new CultRecordHandle<BrokkrSinkEnabled>(BrokkrCommandLedger.SinkKey));
-            });
-            return committed ? Task.CompletedTask : Task.FromException(new InvalidOperationException("The enable commit was refused."));
-        }
-
-        public Task DeleteAnsweredAsync(string[] commandIds)
-        {
-            RequireRunning();
-            var committed = node.Cache.Commit(batch =>
-            {
-                foreach (var commandId in commandIds)
-                {
-                    batch.Remove(BrokkrCommandLedger.CommandKey(commandId));
-                    batch.Remove(BrokkrCommandLedger.ReceiptKey(commandId));
-                }
-            });
-            return committed ? Task.CompletedTask : Task.FromException(new InvalidOperationException("The prune commit was refused."));
-        }
-        public Task FlushAsync()
-        {
-            RequireRunning();
-            return node.FlushAsync(soft: true);
-        }
         // Command ids are single-use: a caller with no id gets a fresh one, and reusing an answered id is a defect.
         internal async Task PublishCommandAsync(BrokkrUnityCommand command)
         {
@@ -210,6 +162,7 @@ namespace GameCult.Brokkr.Editor
             node?.Dispose();
             node = null;
             Ledger = null;
+            Store = null;
         }
     }
 }
