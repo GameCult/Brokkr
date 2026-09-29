@@ -9,13 +9,16 @@ namespace Brokkr.Contracts.Tests;
 // The scenario harness: an editor without Unity. It opens the store exactly as BrokkrCultMeshMirror does (a CultMesh
 // node with StartServer=false over a directory store and durable shard logs) and runs one service tick in the
 // service order: pull, drain pending intents through the ledger, receipt, soft flush, host snapshot, soft flush.
-// "Executing" an intent only records its id, so the scenarios measure delivery and once-only execution, not Unity.
+// "Executing" an intent only records it, so the scenarios measure delivery and once-only execution, not Unity.
 internal sealed class EditorProbe : IDisposable
 {
     private readonly CultMeshNode node;
     private readonly BrokkrCommandLedger ledger;
 
-    internal List<string> Executed { get; } = new();
+    internal List<BrokkrUnityCommand> Executed { get; } = new();
+
+    // What the "editor" answers with. Real Unity answers accepted or failed per the executor.
+    internal Func<BrokkrUnityCommand, string> StatusFor { get; set; } = _ => "accepted";
 
     private EditorProbe(CultMeshNode node)
     {
@@ -41,13 +44,13 @@ internal sealed class EditorProbe : IDisposable
         await ledger.PullAsync();
         while (ledger.TryNextPending(out var command))
         {
-            Executed.Add(command.commandId);
+            Executed.Add(command);
             await node.Database.PutAsync(
                 BrokkrCommandLedger.ReceiptKey(command.commandId),
                 new BrokkrUnityCommandReceipt
                 {
                     commandId = command.commandId,
-                    status = "accepted",
+                    status = StatusFor(command),
                     message = "probe",
                     observedAt = DateTime.UtcNow.ToString("O")
                 });
@@ -56,7 +59,7 @@ internal sealed class EditorProbe : IDisposable
 
         await node.Database.PutAsync(
             new CultRecordKey("unity/host/current"),
-            new BrokkrHostSnapshot { observedAt = DateTime.UtcNow.ToString("O"), projectPath = "probe" });
+            new BrokkrHostSnapshot { observedAt = DateTime.UtcNow.ToString("O"), projectPath = "probe", agentCommandsEnabled = true });
         await node.FlushAsync(soft: true);
     }
 

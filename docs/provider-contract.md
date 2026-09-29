@@ -72,8 +72,16 @@ Primary sync documents:
 
 Operational commands:
 
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action readHost`
+- `dotnet run --project brokkr-command/Brokkr.Command.csproj -- --unity-cache .brokkr/unity-editor.ccmp --action createGameObject --name Marker --local-position 0,1,0`
 - `brokkr-daemon sync-once --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp`
 - `brokkr-daemon sync-loop --unity-cache .brokkr/unity-editor.ccmp --blender-cache .brokkr/blender-editor.ccmp --interval-ms 500`
+
+`brokkr-command` is a caller. Each invocation writes one intent through the
+directory store (every intent field has a `--kebab-case` option; `--view` and
+`--output` fill the capture fields), waits for the receipt, and exits 0 for
+`accepted`, 1 for any other status, and 2 for a usage error or a timeout. It
+never writes receipts, host snapshots or the agent-commands flag.
 
 `sync-loop` owns scheduling only. It repeatedly invokes the same sync decision
 primitive as `sync-once`, writes command intents and sync receipts through the

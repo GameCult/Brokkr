@@ -38,7 +38,7 @@ public sealed class EditorScenarioTests
         await editorLoop;
 
         Assert.Equal(commands, editor.Executed.Count);
-        Assert.Equal(ids.OrderBy(id => id), editor.Executed.OrderBy(id => id));
+        Assert.Equal(ids.OrderBy(id => id), editor.Executed.Select(command => command.commandId).OrderBy(id => id));
         using var audit = project.OpenCache();
         var receipts = audit.AllStoredDocuments.Select(entry => entry.Document).OfType<BrokkrUnityCommandReceipt>().ToArray();
         Assert.Equal(ids.OrderBy(id => id), receipts.Select(receipt => receipt.commandId).OrderBy(id => id));
