@@ -6,6 +6,8 @@ using GameCult.Brokkr;
 using GameCult.Caching;
 using GameCult.Caching.MessagePack;
 
+// Exit codes: 0 the receipt was accepted (or readHost / an unwaited write succeeded); 1 the receipt says the editor
+// did not accept it (failed, denied, expired, interrupted); 2 anything else: bad usage, a timeout, an unreadable store.
 try
 {
     return await Cli.RunAsync(args);
@@ -13,6 +15,11 @@ try
 catch (Exception error) when (error is ArgumentException or TimeoutException or InvalidOperationException)
 {
     Console.Error.WriteLine(error.Message);
+    return 2;
+}
+catch (Exception error)
+{
+    Console.Error.WriteLine($"brokkr-command failed: {error.GetType().Name}: {error.Message}");
     return 2;
 }
 
@@ -47,12 +54,28 @@ internal static class Cli
         var action = Required(options, "--action");
         var readHost = string.Equals(action, "readHost", StringComparison.Ordinal);
 
-        using var cache = await CultCacheMessagePack.OpenAsync(cachePath, new CultCacheOpenOptions
-        {
-            UseDirectoryStore = true,
-            ReadOnly = readHost
-        });
+        using var cache = await OpenAsync(cachePath, readHost);
         return readHost ? await ReadHostAsync(cache) : await WriteIntentAsync(cache, action, options);
+    }
+
+    // An empty file, a legacy single-file store or a damaged shard fails inside CultCache with whatever exception the
+    // decoder throws; the caller gets one message that names the path.
+    private static async Task<CultCache> OpenAsync(string cachePath, bool readOnly)
+    {
+        try
+        {
+            return await CultCacheMessagePack.OpenAsync(cachePath, new CultCacheOpenOptions
+            {
+                UseDirectoryStore = true,
+                ReadOnly = readOnly
+            });
+        }
+        catch (Exception error) when (error is not ArgumentException)
+        {
+            throw new InvalidOperationException(
+                $"Brokkr store '{cachePath}' is unreadable ({error.GetType().Name}: {error.Message}). It must be a directory store written by the Brokkr editor service.",
+                error);
+        }
     }
 
     private static async Task<int> ReadHostAsync(CultCache cache)
@@ -82,13 +105,21 @@ internal static class Cli
 
     private static async Task<int> WriteIntentAsync(CultCache cache, string action, Dictionary<string, string> options)
     {
+        // A command id is single-use, so every invocation is a new act with a new id. --command-id exists for callers
+        // that need to name their own; one that already has a receipt is refused, because that receipt answered an
+        // earlier act and would be reported as the answer to this one.
+        var named = options.TryGetValue("--command-id", out var commandId) && !string.IsNullOrWhiteSpace(commandId);
+        if (named)
+        {
+            await cache.PullAllBackingStoresAsync();
+            if (cache.TryGet(BrokkrCommandLedger.ReceiptKey(commandId!), out BrokkrUnityCommandReceipt? existing) && existing != null)
+                throw new ArgumentException(
+                    $"Command id '{commandId}' already has a receipt ({existing.status}). Command ids are single-use; omit --command-id to get a fresh one.");
+        }
+
         var command = new BrokkrUnityCommand
         {
-            // A command id is single-use, so every invocation is a new act with a new id. --command-id exists for
-            // callers that need to name their own; reusing an answered id is a caller defect.
-            commandId = options.TryGetValue("--command-id", out var commandId) && !string.IsNullOrWhiteSpace(commandId)
-                ? commandId
-                : Guid.NewGuid().ToString("N"),
+            commandId = named ? commandId! : Guid.NewGuid().ToString("N"),
             action = action
         };
         foreach (var (name, value) in options)
@@ -107,12 +138,20 @@ internal static class Cli
 
         var receiptKey = BrokkrCommandLedger.ReceiptKey(command.commandId);
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(waitMilliseconds);
+        var started = false;
         while (DateTimeOffset.UtcNow < deadline)
         {
             await Task.Delay(100);
             await cache.PullAllBackingStoresAsync();
             if (!cache.TryGet(receiptKey, out BrokkrUnityCommandReceipt? receipt) || receipt == null)
                 continue;
+
+            // Attempted is the editor's marker that it has started; the verdict is still to come.
+            if (string.Equals(receipt.status, BrokkrCommandDrain.AttemptedStatus, StringComparison.Ordinal))
+            {
+                started = true;
+                continue;
+            }
 
             Console.WriteLine($"{receipt.status}: {receipt.message}");
             if (!string.IsNullOrWhiteSpace(receipt.objectId))
@@ -125,6 +164,8 @@ internal static class Cli
         var why = host is { agentCommandsEnabled: false }
             ? " The editor reports agent commands off; the operator enables them in the Brokkr window."
             : "";
+        if (started)
+            why = " The editor started this intent and has not recorded a result; it will not run it again.";
         throw new TimeoutException(
             $"Timed out waiting for Brokkr receipt '{receiptKey.Value}'; the intent stays written.{why}");
     }

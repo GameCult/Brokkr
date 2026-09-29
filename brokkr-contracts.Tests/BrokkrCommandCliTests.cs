@@ -202,7 +202,7 @@ public sealed class BrokkrCommandCliTests
             }
         });
 
-        var result = await RunAsync("--unity-cache", project.StorePath, "--action", action, "--wait-ms", "20000");
+        var result = await RunAsync("--unity-cache", project.StorePath, "--action", action, "--output", "probe.png", "--wait-ms", "20000");
         await Task.Delay(200);
         stop.Cancel();
         await loop;
@@ -213,5 +213,91 @@ public sealed class BrokkrCommandCliTests
         using var audit = project.OpenCache();
         var receipt = Assert.Single(audit.AllStoredDocuments.Select(entry => entry.Document).OfType<BrokkrUnityCommandReceipt>());
         Assert.Equal(executed.commandId, receipt.commandId);
+    }
+
+    [Fact]
+    public async Task ReusedCommandIdIsRefusedAndNothingIsWritten()
+    {
+        using var project = new ScratchProject();
+        await project.WriteCommandAsync("used-once", "refreshAssets");
+        using (var editor = project.OpenCache())
+            await BrokkrCommandLedgerTests.Answer(editor, "used-once");
+
+        var result = await RunAsync(
+            "--unity-cache", project.StorePath, "--action", "setEditorPaused", "--command-id", "used-once", "--wait-ms", "2000");
+
+        Assert.Equal(2, result.Exit);
+        Assert.Contains("already has a receipt", result.Error);
+        var intent = Assert.Single(StoredIntents(project));
+        Assert.Equal("refreshAssets", intent.action);
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("legacy")]
+    public async Task UnreadableStoreExitsTwoWithAMessageThatNamesIt(string kind)
+    {
+        using var project = new ScratchProject();
+        Directory.CreateDirectory(Path.GetDirectoryName(project.StorePath)!);
+        // An empty file, or the single-file store the directory store replaced.
+        File.WriteAllBytes(project.StorePath, kind == "empty" ? Array.Empty<byte>() : new byte[] { 0x93, 0x01, 0x02 });
+
+        var write = await RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", "0");
+        var read = await RunAsync("--unity-cache", project.StorePath, "--action", "readHost");
+
+        Assert.Equal(2, write.Exit);
+        Assert.Contains("unreadable", write.Error);
+        Assert.Contains(project.StorePath, write.Error);
+        Assert.Equal(2, read.Exit);
+        Assert.Contains("unreadable", read.Error);
+    }
+
+    [Fact]
+    public async Task WaitContinuesPastTheAttemptMarkerToTheVerdict()
+    {
+        using var project = new ScratchProject();
+        using var editor = await EditorProbe.StartAsync(project.StorePath);
+        editor.OnExecute = _ => Thread.Sleep(1500);
+        using var stop = new CancellationTokenSource();
+        var loop = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                await editor.TickAsync();
+                await Task.Delay(50);
+            }
+        });
+
+        var result = await RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", "20000");
+        stop.Cancel();
+        await loop;
+
+        Assert.Equal(0, result.Exit);
+        Assert.StartsWith("accepted:", result.Out);
+    }
+
+    [Fact]
+    public async Task InterruptedIntentIsReportedAsANonAcceptanceNotAHang()
+    {
+        using var project = new ScratchProject();
+        using var editor = await EditorProbe.StartAsync(project.StorePath);
+        editor.OnExecute = _ => throw new InvalidOperationException("the editor died");
+        using var stop = new CancellationTokenSource();
+        var loop = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                try { await editor.TickAsync(); } catch (InvalidOperationException) { }
+                await Task.Delay(50);
+            }
+        });
+
+        var result = await RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", "20000");
+        stop.Cancel();
+        await loop;
+
+        Assert.Equal(1, result.Exit);
+        Assert.StartsWith("interrupted:", result.Out);
+        Assert.Single(editor.Executed);
     }
 }
