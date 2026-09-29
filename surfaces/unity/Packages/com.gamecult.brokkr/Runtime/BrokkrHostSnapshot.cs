@@ -57,11 +57,6 @@ namespace GameCult.Brokkr
         [Key(10)] public string localPosition = "";
         [Key(11)] public string localEulerAngles = "";
         [Key(12)] public string localScale = "";
-        // Editor view capture (A4): viewKind is scene or game; outputPath is relative to the project root.
-        [Key(13)] public string viewKind = "";
-        [Key(14)] public string outputPath = "";
-        [Key(15)] public int width;
-        [Key(16)] public int height;
         [Key(13)] public string[] materialNames = Array.Empty<string>();
     }
 
