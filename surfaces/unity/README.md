@@ -106,5 +106,17 @@ dotnet run --project F:/Projects/Brokkr/brokkr-command/Brokkr.Command.csproj -- 
 dotnet run --project F:/Projects/Brokkr/brokkr-command/Brokkr.Command.csproj -- --unity-cache <project>/.brokkr/unity-editor.ccmp --action createGameObject --name Marker
 ```
 
-An intent written while the flag is off stays in the store and runs when the
-flag is turned on.
+An intent stored before the flag was last turned on never runs: it gets a
+receipt with `status: expired`, so turning the sink on cannot execute anything
+you did not see. The host snapshot's `agentCommandsEnabledAt` is that instant.
+
+Before the editor runs an intent it writes a receipt with `status: attempted`.
+If the editor stops, or cannot record the result, that intent is reported as
+`interrupted` and is not run again; check the project and send a new intent if
+it should run. One editor tick handles at most 16 intents, expired and denied
+ones included; the rest wait for the next tick. Receipts are never pruned.
+
+`brokkr-command` exits 0 when the receipt is `accepted`, 1 for any other
+receipt status (`failed`, `denied`, `expired`, `interrupted`), and 2 for bad
+usage, a timeout, a store that cannot be opened, or any other failure. A
+`--command-id` that already has a receipt is refused with exit 2.
