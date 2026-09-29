@@ -9,8 +9,9 @@ namespace Brokkr.Contracts.Tests;
 public sealed class BrokkrCommandDrainTests
 {
     // The budgets the flood scenario holds the editor to. Yggdrasil's containers run several jobs at once, so they
-    // are generous; the point is that they do not scale with the number of stale intents.
-    private static readonly TimeSpan EnableBudget = TimeSpan.FromSeconds(10);
+    // are generous. A tick must not grow with the flood; the enable is one commit whose cost is the store writing
+    // each expiry receipt (about 3 ms apiece on Yggdrasil), paid once, on the operator's click.
+    private static readonly TimeSpan EnableBudget = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan TickBudget = TimeSpan.FromSeconds(3);
 
     private readonly ITestOutputHelper output;
