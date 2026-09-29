@@ -305,9 +305,14 @@ public sealed class BrokkrCommandCliTests
     public async Task AnUnexpectedFailureExitsTwoInsteadOfAborting()
     {
         using var project = new ScratchProject();
-        // Past the file-name limit, so the store fails while writing, after it opened cleanly.
-        var result = await RunAsync(
-            "--unity-cache", project.StorePath, "--action", "refreshAssets", "--command-id", new string('x', 400), "--wait-ms", "0");
+        await project.WriteCommandAsync("seed");
+        // The store opens cleanly and then cannot be committed to: a directory sits where the commit lock file goes.
+        var records = project.StorePath + ".records";
+        var lockFile = Path.Combine(records, ".commit.lock");
+        File.Delete(lockFile);
+        Directory.CreateDirectory(lockFile);
+
+        var result = await RunAsync("--unity-cache", project.StorePath, "--action", "refreshAssets", "--wait-ms", "0");
 
         Assert.Equal(2, result.Exit);
         Assert.False(string.IsNullOrWhiteSpace(result.Error));
