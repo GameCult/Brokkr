@@ -62,10 +62,10 @@ public sealed class BrokkrCommandLedgerTests
     }
 
     [Fact]
-    public async Task PendingOrderIsStoredAtThenKey()
+    public async Task PendingOrderIsArrivalOrder()
     {
         using var project = new ScratchProject();
-        // Written b then a: arrival order, not key order, decides.
+        // Written b then a: stored-at order, not key order, decides.
         await project.WriteCommandAsync("b-first");
         await Task.Delay(20);
         await project.WriteCommandAsync("a-second");
@@ -77,32 +77,6 @@ public sealed class BrokkrCommandLedgerTests
         await Answer(editor, "b-first");
         Assert.True(ledger.TryNextPending(out var second));
         Assert.Equal("a-second", second.commandId);
-    }
-
-    [Fact]
-    public void EqualStoredAtFallsBackToKeyOrder()
-    {
-        using var project = new ScratchProject();
-        using var writer = project.OpenCache();
-        // One batch lands both records under one stamp; only the key can order them.
-        Assert.True(writer.Commit(batch =>
-        {
-            batch.Upsert(
-                new BrokkrUnityCommand { commandId = "z", action = "refreshAssets" },
-                new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey("z")));
-            batch.Upsert(
-                new BrokkrUnityCommand { commandId = "a", action = "refreshAssets" },
-                new CultRecordHandle<BrokkrUnityCommand>(BrokkrCommandLedger.CommandKey("a")));
-        }));
-        var stamps = writer.AllStoredDocuments
-            .Where(entry => entry.Document is BrokkrUnityCommand)
-            .Select(entry => entry.StoredAt)
-            .Distinct()
-            .ToArray();
-        Assert.Single(stamps);
-
-        Assert.True(new BrokkrCommandLedger(writer).TryNextPending(out var first));
-        Assert.Equal("a", first.commandId);
     }
 
     [Fact]

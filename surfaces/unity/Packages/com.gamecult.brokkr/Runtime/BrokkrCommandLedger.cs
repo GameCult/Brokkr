@@ -29,7 +29,7 @@ namespace GameCult.Brokkr
         // Loads writes that other processes have landed in the backing store.
         public Task PullAsync() => cache.PullAllBackingStoresAsync();
 
-        // The oldest unanswered intent: stored-at order, then key order.
+        // The oldest unanswered intent by stored-at. Exact ties keep the cache's own order (schema, then key): the sort is stable.
         public bool TryNextPending(out BrokkrUnityCommand command)
         {
             var stored = cache.AllStoredDocuments.ToArray();
@@ -42,7 +42,6 @@ namespace GameCult.Brokkr
             command = stored
                 .Where(entry => entry.Document is BrokkrUnityCommand)
                 .OrderBy(entry => entry.StoredAt, StringComparer.Ordinal)
-                .ThenBy(entry => entry.Key.Value, StringComparer.Ordinal)
                 .Select(entry => (BrokkrUnityCommand)entry.Document)
                 .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.commandId)
                                              && !answered.Contains(candidate.commandId));
