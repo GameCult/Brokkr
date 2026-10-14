@@ -20,10 +20,11 @@ Brokkr's daemon must read them. The two changes therefore land together.
 - **One payload format.** Every store the daemon and the Blender bridge write carries
   MessagePack payloads. The daemon reads exactly one MessagePack value per payload and
   refuses trailing bytes.
-- **Conversion never writes a source.** An existing JSON store is converted into a new
-  file, with `cultcache_py.convert` for the bridge's store and a one-shot daemon
-  subcommand for the daemon's receipts. The JSON original is kept for as long as the
-  operator wants it.
+- **Conversion never writes a source.** An existing JSON bridge store is converted into
+  a new file with `cultcache_py.convert`, and the JSON original is kept for as long as
+  the operator wants it. No daemon-written single-file store existed on 2026-10-14, so
+  the cut ships no receipt converter. If one turns up at window time, stop and report
+  it to the operator.
 - **The bridge refuses a cultcache-py without `convert`.** A checkout older than the
   branch is refused at load, so it can never write a format the daemon cannot read.
 - **One operator window.**
