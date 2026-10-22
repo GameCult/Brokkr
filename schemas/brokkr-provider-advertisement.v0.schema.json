@@ -3,14 +3,13 @@
   "$id": "gamecult.brokkr.provider_advertisement.v0",
   "title": "Brokkr Provider Advertisement",
   "type": "object",
-  "required": ["schema", "provider", "authority", "transports", "toolSurfaces", "eveSurfaces", "commandPolicy"],
+  "required": ["schema", "provider", "authority", "transports", "toolSurfaces", "commandPolicy"],
   "properties": {
     "schema": { "const": "gamecult.brokkr.provider_advertisement.v0" },
     "provider": { "type": "object" },
     "authority": { "type": "object" },
     "transports": { "type": "array" },
     "toolSurfaces": { "type": "array" },
-    "eveSurfaces": { "type": "array" },
     "commandPolicy": { "type": "object" }
   }
 }

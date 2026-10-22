@@ -43,8 +43,6 @@ CAPABILITIES = (
     "selection.read",
     "selection.write",
     "command.receipt.publish",
-    "eve.gui.publish",
-    "eve.tui.publish",
 )
 
 

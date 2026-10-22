@@ -23,7 +23,6 @@ struct ProviderAdvertisement {
     mirror_documents: Vec<MirrorDocument>,
     sync_organ: SyncOrgan,
     realtime_routes: Vec<RealtimeRoute>,
-    eve_surfaces: Vec<EveSurface>,
     command_policy: CommandPolicy,
 }
 
@@ -108,15 +107,6 @@ struct RealtimeRoute {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EveSurface {
-    id: &'static str,
-    title: &'static str,
-    cult_mesh_uri: &'static str,
-    schema: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct CommandPolicy {
     mode: &'static str,
     envelope_schema: &'static str,
@@ -193,7 +183,7 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
             owner: PROVIDER_ID,
             role: "creative-tool Verse broker",
             state_owner: "CultCache documents mirrored through CultMesh",
-            presentation_owner: "Eve/CultUI projections over mirrored editor state",
+            presentation_owner: "none yet; typed mirrored editor state only (Thing 2 will project it)",
             discovery_owner: "Odin rendezvous over Brokkr provider advertisement",
         },
         transports: vec![Transport {
@@ -230,8 +220,6 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "sync.var.publish",
                     "sync.timeline.bind",
                     "command.receipt.publish",
-                    "eve.gui.publish",
-                    "eve.tui.publish",
                     "quest.input.consume",
                     "quest.pose.consume",
                     "quest.video_input.publish",
@@ -261,8 +249,6 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "sync.var.publish",
                     "sync.timeline.bind",
                     "command.receipt.publish",
-                    "eve.gui.publish",
-                    "eve.tui.publish",
                 ],
             },
         ],
@@ -354,20 +340,6 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
         ],
         sync_organ: build_sync_organ(),
         realtime_routes: build_unity_quest_routes(),
-        eve_surfaces: vec![
-            EveSurface {
-                id: "brokkr.eve.unity_editor_gui.v0",
-                title: "Unity Editor GUI",
-                cult_mesh_uri: "cultmesh://brokkr/eve/unity/gui",
-                schema: "gamecult.eve.surface.v1",
-            },
-            EveSurface {
-                id: "brokkr.eve.unity_editor_tui.v0",
-                title: "Unity Editor TUI",
-                cult_mesh_uri: "cultmesh://brokkr/eve/unity/tui",
-                schema: "gamecult.eve.surface.v1",
-            },
-        ],
         command_policy: CommandPolicy {
             mode: "intent-documents-with-host-receipts",
             envelope_schema: "brokkr.unity.command_intent.v0",

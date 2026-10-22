@@ -7,7 +7,7 @@ to the Verse without pretending those runtimes are the same machine.
 The name earns its keep twice. Brokkr is the dwarf at the forge bellows in the
 Eddic treasure contest, holding the work steady while the artifact takes shape.
 Brokkr is also the broker: the daemon that routes typed editor observations,
-capabilities, commands, and Eve/CultUI surfaces between tool runtimes and the
+capabilities, and commands between tool runtimes and the
 Verse.
 
 ## Authority
@@ -18,7 +18,7 @@ Verse.
   build settings, and editor-side side effects.
 - Blender owns Blender editor truth: scenes, objects, assets, operators, add-ons,
   render settings, and editor-side side effects.
-- Eve owns rendering of Brokkr surfaces.
+- Eve is deprecated and Thing 2 is its successor; Brokkr advertises no dashboard surface meanwhile (see the provider contract).
 - Odin owns discovery of Brokkr as a Verse provider.
 - CultCache owns durable `.cc` witnesses and command receipts.
 

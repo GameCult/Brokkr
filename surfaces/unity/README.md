@@ -1,7 +1,7 @@
 # Brokkr Unity Adapter
 
 This package lets the Unity Editor publish its scene, component, asset, command,
-receipt, Quest, and Eve/CultUI state as typed CultCache documents synced through
+receipt, and Quest state as typed CultCache documents synced through
 CultMesh.
 
 ## Install By Local Path

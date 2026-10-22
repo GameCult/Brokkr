@@ -4,7 +4,7 @@ Provider id: `brokkr.creative_tool_broker`
 
 CultMesh base URI: `cultmesh://brokkr`
 
-Primary Eve surface id: `brokkr.eve.tool_broker.v0`
+Eve is deprecated, and Thing 2 is its successor (`thing2:ruling:eve-dashboards-quarantined`, 2026-10-22). Brokkr advertises no operator-dashboard surface; it publishes typed CultMesh state meanwhile.
 
 ## Tool Kinds
 
@@ -30,8 +30,6 @@ Primary Eve surface id: `brokkr.eve.tool_broker.v0`
 - `editor.lifecycle.write`
 - `editor.view.capture`
 - `command.receipt.publish`
-- `eve.gui.publish`
-- `eve.tui.publish`
 
 ## Mirror Documents
 
@@ -224,16 +222,6 @@ receipts.
 `setObjectParent` uses `targetObjectName` and optional `parentObjectName`; an
 empty parent reparents the object to the Blender scene root.
 
-## Eve/CultUI Lowerings
+## Operator Views
 
-Unity publishes lowerable Eve/CultUI documents through CultMesh. GUI and TUI
-clients render those documents as views over the same mirrored state:
-
-- scene graph
-- component state
-- asset library
-- command affordances
-- command receipts
-
-These documents are interface state over Unity observations and receipts. They
-do not own editor truth.
+Eve is deprecated, and Thing 2 is its successor (`thing2:ruling:eve-dashboards-quarantined`, 2026-10-22). Brokkr advertises no operator-dashboard surface; it publishes typed CultMesh state meanwhile. The scene graph, component state, asset library, command affordances and command receipts are mirrored documents; a future Thing 2 view over them does not own editor truth.
