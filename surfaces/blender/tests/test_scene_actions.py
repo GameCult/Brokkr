@@ -391,6 +391,29 @@ class PathTests(unittest.TestCase):
                 with self.assertRaises(sa.ActionRefused, msg=name):
                     sa.resolve_inside(tmp, name, "output")
 
+    def test_check_relative_itself_refuses_dotdot_and_nul(self):
+        # Each rule on its own: resolve_inside's link walk also trips on '..', so only a
+        # direct call proves the text rule.
+        for name in ("a/../b", "..", "a\\..\\b", "a\x00b"):
+            with self.assertRaises(sa.ActionRefused, msg=repr(name)):
+                sa.check_relative(name, "output")
+        self.assertEqual(sa.check_relative("a\\b/./c", "output"), ["a", "b", "c"])
+
+    def test_a_component_the_os_refuses_to_resolve_counts_as_a_link(self):
+        # Windows raises WinError 448 resolving some junctions; that is a link refusal, not a crash.
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "j").mkdir()
+            real = Path.resolve
+
+            def resolve(self, *args, **kwargs):
+                if self.name == "j":
+                    raise OSError(448, "untrusted mount point")
+                return real(self, *args, **kwargs)
+
+            with mock.patch.object(Path, "resolve", resolve):
+                with self.assertRaisesRegex(sa.ActionRefused, "link"):
+                    sa.resolve_inside(tmp, "j/x.png", "output")
+
 
 if __name__ == "__main__":
     unittest.main()

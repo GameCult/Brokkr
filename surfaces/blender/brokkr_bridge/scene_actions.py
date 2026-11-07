@@ -84,7 +84,12 @@ def resolve_inside(root: str, candidate: str, label: str, *, new_file: bool = Fa
     current = base
     for part in parts:
         step = current / part
-        if os.path.lexists(step) and not _same(step.resolve(), current / part):
+        try:
+            linked = os.path.lexists(step) and not _same(step.resolve(), current / part)
+        except OSError:
+            # Windows refuses to traverse some junctions outright (WinError 448, untrusted mount point).
+            linked = True
+        if linked:
             raise ActionRefused(f"{label} path goes through a link at {part!r}.")
         current = step
     try:

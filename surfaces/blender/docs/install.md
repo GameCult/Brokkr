@@ -133,3 +133,23 @@ The scene actions were run against Blender 5.2.3 LTS headless with
 `surfaces/blender/tests/live/headless_smoke.py` (usage in its docstring). One real
 failure it found: Blender's `engine` enum is dynamic, so `bl_rna` lists only
 `BLENDER_EEVEE`; `renderStill` now asks Blender by assignment instead.
+
+### Path rules and the residual race
+
+Both directories take plain relative names only, judged as text the same on every OS:
+no drive (`C:`, `C:foo`), UNC or `\\?\` form, leading separator, `..`, NUL, `:` anywhere
+(also NTFS streams), trailing dot or space, or Windows device name. No existing component
+may be a symlink or junction (Windows' "untrusted mount point" error on a junction counts
+as one). `renderStill` refuses any output name that already exists, including symlinks
+(even dangling) and hardlinks. `importGltf` parses the `.gltf` JSON (or a `.glb`'s first
+chunk) and refuses every `buffers[].uri` / `images[].uri` that is not `data:` or a
+relative path inside the import directory; `.gltf` files from the same folder tree work.
+
+**Residual TOCTOU.** The checks run in the add-on, and the path is re-checked (resolved
+name, plus size and modification time of the file and its references) immediately before
+use, but Blender's own importer and renderer then open the files themselves. Someone who
+can write to the import or output directory in that last gap can still swap a file or
+link in. The add-on cannot close that window from Python: make both directories writable
+only by trusted users, and treat the checks as protection against a malicious *intent*,
+not against a hostile local writer. A same-size, same-mtime content swap is also not
+detected by the re-check.

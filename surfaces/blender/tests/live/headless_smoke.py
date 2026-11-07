@@ -5,9 +5,11 @@
 
 Writes a tiny .glb into <scratch>/in, runs every scene action against real bpy, and prints
 RESULT lines (accepted/failed) plus the state each action should have produced.
-Last run: Blender 5.2.3 LTS on Windows, all actions accepted, both escapes refused.
+Windows only: also makes real mklink /J junctions (one pointing outside the root, one inside it) and
+expects importGltf and renderStill to refuse paths through them, plus an existing-output refusal.
+Last run: see the PR.
 """
-import json, struct, sys, types, os, traceback
+import json, struct, sys, types, os, subprocess, shutil, traceback
 from pathlib import Path
 import bpy
 
@@ -71,5 +73,27 @@ print("FILE pano", (ROOT / "out" / "pano.png").exists(), (ROOT / "out" / "pano.p
 run("renderStill_workbench", action="renderStill", outputPath="wb/shot.jpg", engine="BLENDER_WORKBENCH", resolutionX=64, resolutionY=64)
 print("FILE wb", (ROOT / "out" / "wb" / "shot.jpg").exists())
 run("renderStill_escape", action="renderStill", outputPath="../evil.png")
+
+def junction(link, target):
+    link = Path(link)
+    if link.exists() or os.path.lexists(link):
+        os.rmdir(link)
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True, capture_output=True)
+
+if os.name == "nt":
+    elsewhere = ROOT.parent / (ROOT.name + "-elsewhere"); elsewhere.mkdir(exist_ok=True)
+    shutil.copy(ROOT / "in" / "tiny.glb", elsewhere / "tiny.glb")
+    (ROOT / "in" / "realdir").mkdir(exist_ok=True); shutil.copy(ROOT / "in" / "tiny.glb", ROOT / "in" / "realdir" / "tiny.glb")
+    junction(ROOT / "in" / "jout", elsewhere)            # junction leaving the root
+    junction(ROOT / "in" / "jin", ROOT / "in" / "realdir")  # junction staying inside the root
+    junction(ROOT / "out" / "jout", elsewhere)
+    for label, cmd in (("junction_import_outside", dict(action="importGltf", filepath="jout/tiny.glb")),
+                       ("junction_import_inside", dict(action="importGltf", filepath="jin/tiny.glb")),
+                       ("junction_render_outside", dict(action="renderStill", outputPath="jout/shot.png", engine="BLENDER_WORKBENCH", resolutionX=8, resolutionY=8))):
+        r = run(label, **cmd)
+        print("JUNCTION_RULE", label, r["status"] == "failed" and "link" in r.get("message", ""))
+    print("JUNCTION_LEAK", (elsewhere / "shot.png").exists())
+    run("render_existing_output", action="renderStill", outputPath="wb/shot.jpg", engine="BLENDER_WORKBENCH", resolutionX=8, resolutionY=8)
+    os.rmdir(ROOT / "in" / "jout"); os.rmdir(ROOT / "in" / "jin"); os.rmdir(ROOT / "out" / "jout")
 print("RESTORED", sc.render.engine, sc.render.resolution_x, sc.render.resolution_y, sc.camera and sc.camera.name)
 print("SUMMARY", results)
