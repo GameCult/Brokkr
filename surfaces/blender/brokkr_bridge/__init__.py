@@ -60,6 +60,20 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         description="Optional JSON debug export/import root; CultMesh remains the mirror owner",
     )
 
+    import_dir: bpy.props.StringProperty(
+        name="Import Directory",
+        subtype="DIR_PATH",
+        default="",
+        description="importGltf may only read files inside this directory; empty disables importGltf",
+    )
+
+    output_dir: bpy.props.StringProperty(
+        name="Render Output Directory",
+        subtype="DIR_PATH",
+        default="",
+        description="renderStill may only write files inside this directory; empty disables renderStill",
+    )
+
     auto_capture: bpy.props.BoolProperty(
         name="Auto Capture",
         default=False,
@@ -256,6 +270,8 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "cultmesh_cache_path")
         layout.prop(self, "cultlib_py_src")
         layout.prop(self, "debug_mirror_root")
+        layout.prop(self, "import_dir")
+        layout.prop(self, "output_dir")
         layout.prop(self, "auto_capture")
         layout.prop(self, "auto_drain_commands")
         layout.prop(self, "serve_host")
@@ -408,6 +424,7 @@ class BROKKR_OT_drain_commands(bpy.types.Operator):
 
     def execute(self, context):
         prefs = context.preferences.addons[__name__].preferences
+        target().configure_action_dirs(prefs.import_dir, prefs.output_dir)
         receipts = target().drain_commands(
             context,
             prefs.cultmesh_cache_path,
@@ -568,6 +585,7 @@ def _auto_drain_commands():
         return 1.0
 
     try:
+        adapter.configure_action_dirs(prefs.import_dir, prefs.output_dir)
         adapter.drain_commands(
             context,
             prefs.cultmesh_cache_path,

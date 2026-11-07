@@ -215,6 +215,11 @@ All Blender writes use `brokkr.blender.command_intent.v0` and receive
 - `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`
+- `importGltf`
+- `setCamera`
+- `setLight`
+- `setWorld`
+- `renderStill`
 
 Blender owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Blender executes recognized intents and publishes

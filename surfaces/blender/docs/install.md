@@ -71,3 +71,30 @@ Admitted command actions:
 - `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`
+- `importGltf`
+- `setCamera`
+- `setLight`
+- `setWorld`
+- `renderStill`
+
+Scene action fields (all other keys are ignored; a refused intent changes nothing and
+gets a `failed` receipt whose message names the rule):
+
+- `importGltf`: `filepath`, `.gltf` or `.glb`, relative to the add-on preference
+  `Import Directory` (absolute paths, `..` and symlinks that resolve outside it are
+  refused). Empty `Import Directory` disables the action. Needs Blender's glTF add-on.
+- `setCamera`: `targetObjectName` (a camera object); optional `lens` (mm),
+  `cameraType` (`PERSP`, `ORTHO`, `PANO`), `panoramaType` (for example
+  `EQUIRECTANGULAR`; read from the camera, or from `camera.cycles` before Blender 4.2),
+  `orthoScale`, `clipStart`, `clipEnd`, `active` (true makes it the scene camera).
+  Panoramic cameras render in Cycles.
+- `setLight`: `targetObjectName` (a light object); optional `energy` (>= 0),
+  `color` (linear `[r, g, b]`, each 0 to 1), `lightType` (`POINT`, `SUN`, `SPOT`, `AREA`).
+- `setWorld`: optional `worldName` (default: the scene's world, created if there is
+  none), `color` (`[r, g, b]`), `strength`. Edits the world's Background node.
+- `renderStill`: `outputPath` relative to the preference `Render Output Directory`,
+  ending `.png`, `.jpg` or `.exr` (same containment rules as import); optional
+  `engine` (any engine of the running Blender, case-insensitive), `resolutionX`,
+  `resolutionY` (whole numbers, 1 to 16384), `cameraName`. Engine, resolution,
+  camera, file path and format are restored after the render. The render blocks
+  Blender's UI until it finishes.
