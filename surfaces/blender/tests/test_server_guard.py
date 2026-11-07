@@ -261,6 +261,23 @@ class RealServerTests(unittest.TestCase):
         response = server._handle_connection_message(message, {})
         self.assertIn("malformed", response[0].get("code", ""))  # past the guard, refused by the store as an empty put
 
+    def test_a_peer_put_is_accepted_over_tcp_because_the_target_grants_peer_writes(self):
+        status = self.start()
+        cultmesh, _ = bt._load_cultmesh(PACKAGES)
+        import cultnet_py
+        document = self.target._documents["command_intent"]
+        client = cultmesh.CultMesh.create_client("127.0.0.1", status["port"], timeout_seconds=3.0)
+        with client.subscribe_database(subscription_id="peer", schema_ids=[bt.COMMAND_INTENT_SCHEMA],
+                                       include_snapshot=False) as subscription:
+            subscription.send(cultnet_py.document_put_raw(
+                message_id="peer-put", key="blender/commands/peer", schema_id=document.catalog_entry().schema_id,
+                stored_at="2026-11-07T00:00:00Z",
+                payload=document.encode_payload({
+                    "schema": bt.COMMAND_INTENT_SCHEMA, "commandId": "peer", "action": "createObject"}),
+            ))
+            change = subscription.read_next_change()  # a refusal would raise CultNetPeerError instead
+        self.assertEqual(change.record_key, "blender/commands/peer")
+
     def queue_intent(self, key="blender/commands/q1"):
         node, documents = self.target._open_node(self.cache, PACKAGES)
         node.database.put(documents["command_intent"], key, {

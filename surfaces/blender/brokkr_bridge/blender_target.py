@@ -345,6 +345,12 @@ class BrokkrBlenderTarget:
         guard = SessionGuard() if require_token else None
         if guard is not None:
             server_class = guarded_server_class(server_class, guard)
+        # The add-on's own clients put command intents to this server, so it grants peer writes
+        # explicitly: cultmesh_py refuses them by default, and the session token above is what
+        # authenticates a peer when it is required. A cultmesh_py older than the gate has no
+        # CultMeshGrantAllWrites and already accepts every write.
+        grant_all = getattr(cultmesh, "CultMeshGrantAllWrites", None)
+        authority_args = {"write_authority": grant_all()} if grant_all is not None else {}
         server = server_class(
             node=node,
             verse_catalog=verse_catalog,
@@ -354,6 +360,7 @@ class BrokkrBlenderTarget:
             display_name="Brokkr Blender Editor",
             max_snapshot_documents=int(max_snapshot_documents),
             max_snapshot_bytes=int(max_snapshot_bytes),
+            **authority_args,
         ).start()
 
         endpoint = f"cultnet://{resolved_host}:{server.port}"

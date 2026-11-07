@@ -51,6 +51,12 @@ write, not only at connect. Reads stay open. `Stop Server`, quitting, or
 disabling the add-on revokes it; it is held in memory only and never saved to
 preferences or the cache.
 
+Peer write scope: CultLib's `cultmesh_py` refuses peer writes unless an authority grants them, and the add-on
+passes `CultMeshGrantAllWrites()`. A peer that gets past the session token (or any peer, when the token is off) can
+therefore put or delete **any registered document** on the served node, not only command intents. That is acceptable
+on loopback, the default; a grant scoped to command intents is future work. Do not combine `Allow Non-Loopback Bind`
+with the token off.
+
 Run the tests (no Blender needed; `CULTLIB_PACKAGES` adds the real-server tests):
 
 ```text
