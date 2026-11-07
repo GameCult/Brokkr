@@ -101,3 +101,55 @@ Admitted command actions:
 - `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`
+- `importGltf`
+- `setCamera`
+- `setLight`
+- `setWorld`
+- `renderStill`
+
+Scene action fields (all other keys are ignored; a refused intent changes nothing and
+gets a `failed` receipt whose message names the rule):
+
+- `importGltf`: `filepath`, `.gltf` or `.glb`, relative to the add-on preference
+  `Import Directory` (absolute paths, `..` and symlinks that resolve outside it are
+  refused). Empty `Import Directory` disables the action. Needs Blender's glTF add-on.
+- `setCamera`: `targetObjectName` (a camera object); optional `lens` (mm),
+  `cameraType` (`PERSP`, `ORTHO`, `PANO`), `panoramaType` (for example
+  `EQUIRECTANGULAR`; read from the camera, or from `camera.cycles` before Blender 4.2),
+  `orthoScale`, `clipStart`, `clipEnd`, `active` (true makes it the scene camera).
+  Panoramic cameras render in Cycles.
+- `setLight`: `targetObjectName` (a light object); optional `energy` (>= 0),
+  `color` (linear `[r, g, b]`, each 0 to 1), `lightType` (`POINT`, `SUN`, `SPOT`, `AREA`).
+- `setWorld`: optional `worldName` (default: the scene's world, created if there is
+  none), `color` (`[r, g, b]`), `strength`. Edits the world's Background node.
+- `renderStill`: `outputPath` relative to the preference `Render Output Directory`,
+  ending `.png`, `.jpg` or `.exr` (same containment rules as import); optional
+  `engine` (any engine of the running Blender, case-insensitive), `resolutionX`,
+  `resolutionY` (whole numbers, 1 to 16384), `cameraName`. Engine, resolution,
+  camera, file path and format are restored after the render. The render blocks
+  Blender's UI until it finishes.
+
+The scene actions were run against Blender 5.2.3 LTS headless with
+`surfaces/blender/tests/live/headless_smoke.py` (usage in its docstring). One real
+failure it found: Blender's `engine` enum is dynamic, so `bl_rna` lists only
+`BLENDER_EEVEE`; `renderStill` now asks Blender by assignment instead.
+
+### Path rules and the residual race
+
+Both directories take plain relative names only, judged as text the same on every OS:
+no drive (`C:`, `C:foo`), UNC or `\\?\` form, leading separator, `..`, NUL, `:` anywhere
+(also NTFS streams), trailing dot or space, or Windows device name. No existing component
+may be a symlink or junction (Windows' "untrusted mount point" error on a junction counts
+as one). `renderStill` refuses any output name that already exists, including symlinks
+(even dangling) and hardlinks. `importGltf` parses the `.gltf` JSON (or a `.glb`'s first
+chunk) and refuses every `buffers[].uri` / `images[].uri` that is not `data:` or a
+relative path inside the import directory; `.gltf` files from the same folder tree work.
+
+**Residual TOCTOU.** The checks run in the add-on, and the path is re-checked (resolved
+name, plus size and modification time of the file and its references) immediately before
+use, but Blender's own importer and renderer then open the files themselves. Someone who
+can write to the import or output directory in that last gap can still swap a file or
+link in. The add-on cannot close that window from Python: make both directories writable
+only by trusted users, and treat the checks as protection against a malicious *intent*,
+not against a hostile local writer. A same-size, same-mtime content swap is also not
+detected by the re-check.

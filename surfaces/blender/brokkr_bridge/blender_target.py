@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import scene_actions as sa
 from .server_guard import BindRefused, SessionGuard, check_bind, guarded_server_class, is_loopback_host, purge_command_intents
 
 PROVIDER_ID = "brokkr.blender_editor"
@@ -44,6 +45,11 @@ CAPABILITIES = (
     "material.assign",
     "selection.read",
     "selection.write",
+    "asset.import.gltf",
+    "camera.write",
+    "light.write",
+    "world.write",
+    "render.still",
     "command.receipt.publish",
 )
 
@@ -65,6 +71,13 @@ class BrokkrBlenderTarget:
         self._guard: SessionGuard | None = None
         self._cultmesh_module: str = ""
         self._debug_mirror_root: str = ""
+        self.import_dir: str = ""
+        self.output_dir: str = ""
+
+    def configure_action_dirs(self, import_dir: str, output_dir: str) -> None:
+        """The directories importGltf and renderStill may touch; empty leaves that action disabled."""
+        self.import_dir = self.bpy.path.abspath(import_dir) if import_dir else ""
+        self.output_dir = self.bpy.path.abspath(output_dir) if output_dir else ""
 
     def resolve_cache_path(self, cache_path: str) -> str:
         return self.bpy.path.abspath(cache_path or DEFAULT_CULTMESH_CACHE_PATH)
@@ -467,7 +480,19 @@ class BrokkrBlenderTarget:
                 return self._select_object(context, command)
             if action == "assignMaterial":
                 return self._assign_material(context, command)
+            if action == "importGltf":
+                return self._import_gltf(context, command)
+            if action == "setCamera":
+                return self._set_camera(context, command)
+            if action == "setLight":
+                return self._set_light(context, command)
+            if action == "setWorld":
+                return self._set_world(context, command)
+            if action == "renderStill":
+                return self._render_still(context, command)
             return self._receipt(command, "failed", f"Unsupported Blender command action: {action}", "")
+        except sa.ActionRefused as error:
+            return self._receipt(command, "failed", str(error), "")
         except Exception as error:
             return self._receipt(command, "failed", str(error), "")
 
@@ -567,6 +592,152 @@ class BrokkrBlenderTarget:
             obj.data.materials.append(material)
             return self._receipt(command, "accepted", "Blender material assigned.", obj.name)
         return self._receipt(command, "failed", "Target object cannot receive materials.", obj.name)
+
+    def _import_gltf(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        name = str(command.get("filepath") or "")
+        path = sa.resolve_inside(self.import_dir, name, "import")
+        sa.require_gltf(path)
+        stamped = sa.fingerprint([path])  # before the parse, so a swap during it shows
+        references = sa.gltf_references(path)
+        existing = references  # gltf_references refuses a missing one
+        checked = (stamped, sa.fingerprint(existing))
+        # Re-check immediately before use: the same path, the same files, the same bytes' stats.
+        # Blender then opens the files itself, so a swap in that last gap is not prevented
+        # (residual TOCTOU): the import directory must only be writable by trusted users.
+        if sa.resolve_inside(self.import_dir, name, "import") != path or \
+                (sa.fingerprint([path]), sa.fingerprint(existing)) != checked:
+            raise sa.ActionRefused("Import file changed while it was being checked.")
+        before = set(self.bpy.data.objects.keys())
+        self.bpy.ops.import_scene.gltf(filepath=str(path))
+        added = sorted(set(self.bpy.data.objects.keys()) - before)
+        return self._receipt(command, "accepted", f"Imported {len(added)} object(s) from {path.name}.", added[0] if added else "")
+
+    def _resolve_typed(self, command: dict[str, Any], object_type: str) -> Any:
+        obj = self._resolve_object(command)
+        if obj is None:
+            raise sa.ActionRefused("Target Blender object was not found.")
+        if obj.type != object_type:
+            raise sa.ActionRefused(f"Target Blender object is not a {object_type}.")
+        return obj
+
+    def _set_camera(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        obj = self._resolve_typed(command, "CAMERA")
+        camera = obj.data
+        # Validate everything before changing anything, so a refused intent leaves the camera alone.
+        lens = sa.number(command, "lens", 1.0, sa.MAX_LENS_MM)
+        camera_type = sa.choice(command, "cameraType", sa.CAMERA_TYPES)
+        ortho_scale = sa.number(command, "orthoScale", 0.001, 100000.0)
+        clip_start = sa.number(command, "clipStart", 0.0001, 1.0e6)
+        clip_end = sa.number(command, "clipEnd", 0.001, 1.0e7)
+        panorama_type = sa.choice(command, "panoramaType", self._panorama_types(camera))
+        if lens is not None:
+            camera.lens = lens
+        if camera_type is not None:
+            camera.type = camera_type
+        if ortho_scale is not None:
+            camera.ortho_scale = ortho_scale
+        if clip_start is not None:
+            camera.clip_start = clip_start
+        if clip_end is not None:
+            camera.clip_end = clip_end
+        if panorama_type is not None:
+            # Blender 4.2 moved panorama_type from camera.cycles to the camera itself.
+            holder = camera if hasattr(camera, "panorama_type") else camera.cycles
+            holder.panorama_type = panorama_type
+        if command.get("active"):
+            context.scene.camera = obj
+        return self._receipt(command, "accepted", "Blender camera updated.", obj.name)
+
+    def _panorama_types(self, camera: Any) -> tuple[str, ...]:
+        holder = camera if hasattr(camera, "panorama_type") else getattr(camera, "cycles", camera)
+        try:
+            return tuple(item.identifier for item in holder.bl_rna.properties["panorama_type"].enum_items)
+        except (KeyError, AttributeError):
+            return ("EQUIRECTANGULAR", "EQUIDISTANT", "FISHEYE_EQUISOLID", "MIRRORBALL")
+
+    def _set_light(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        obj = self._resolve_typed(command, "LIGHT")
+        energy = sa.number(command, "energy", 0.0, 1.0e7)
+        light_color = sa.color(command)
+        light_type = sa.choice(command, "lightType", sa.LIGHT_TYPES)
+        if energy is not None:
+            obj.data.energy = energy
+        if light_color is not None:
+            obj.data.color = light_color
+        if light_type is not None:
+            obj.data.type = light_type
+        return self._receipt(command, "accepted", "Blender light updated.", obj.name)
+
+    def _set_world(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        world_color = sa.color(command)
+        strength = sa.number(command, "strength", 0.0, 1.0e6)
+        name = str(command.get("worldName") or "")
+        scene = context.scene
+        world = self.bpy.data.worlds.get(name) if name else scene.world
+        if world is None:
+            world = self.bpy.data.worlds.new(name or "Brokkr World")
+        scene.world = world
+        world.use_nodes = True
+        background = world.node_tree.nodes.get("Background")
+        if background is None:
+            raise sa.ActionRefused("World has no Background node to configure.")
+        if world_color is not None:
+            background.inputs["Color"].default_value = (*world_color, 1.0)
+        if strength is not None:
+            background.inputs["Strength"].default_value = strength
+        return self._receipt(command, "accepted", "Blender world updated.", world.name)
+
+    def _render_still(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        scene = context.scene
+        render = scene.render
+        name = str(command.get("outputPath") or "")
+        path = sa.resolve_inside(self.output_dir, name, "output", new_file=True)
+        file_format = sa.still_format(path)
+        # The engine enum is dynamic (Cycles and add-on engines register at runtime), and RNA's
+        # enum_items on a dynamic enum lists only its static defaults, so the running Blender is
+        # asked by assignment below and a TypeError there is the refusal.
+        engine = command.get("engine")
+        if engine is not None and (not isinstance(engine, str) or not engine.strip()):
+            raise sa.ActionRefused("engine must be a render engine identifier.")
+        engine = engine.strip().upper() if engine else None
+        width = sa.integer(command, "resolutionX", 1, sa.MAX_RESOLUTION)
+        height = sa.integer(command, "resolutionY", 1, sa.MAX_RESOLUTION)
+        camera_name = str(command.get("cameraName") or "")
+        camera = None
+        if camera_name:
+            camera = self.bpy.data.objects.get(camera_name)
+            if camera is None or camera.type != "CAMERA":
+                raise sa.ActionRefused(f"Camera object was not found: {camera_name}")
+        # Render settings are the intent's for this render only; put them back afterwards.
+        saved = (render.engine, render.resolution_x, render.resolution_y, render.filepath,
+                 render.image_settings.file_format, scene.camera)
+        try:
+            if engine is not None:
+                try:
+                    render.engine = engine
+                except TypeError:
+                    raise sa.ActionRefused(f"engine {engine} is not available in this Blender.") from None
+            if width is not None:
+                render.resolution_x = width
+            if height is not None:
+                render.resolution_y = height
+            if camera is not None:
+                scene.camera = camera
+            render.filepath = str(path)
+            render.image_settings.file_format = file_format
+            # Folders are made only after every refusal that can still come from Blender (an unknown
+            # engine), so a refused render leaves none behind. Then re-check after the folders exist
+            # and immediately before use: no link was swapped in, and the name is still free. Blender
+            # opens the file itself afterwards, so a swap in that last gap is not prevented (residual
+            # TOCTOU): the output directory must only be writable by trusted users.
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
+                raise sa.ActionRefused("Output path changed while it was being checked.")
+            self.bpy.ops.render.render(write_still=True)
+        finally:
+            (render.engine, render.resolution_x, render.resolution_y, render.filepath,
+             render.image_settings.file_format, scene.camera) = saved
+        return self._receipt(command, "accepted", f"Rendered still to {path.name}.", scene.name)
 
     def _resolve_object(self, command: dict[str, Any]) -> Any:
         name = command.get("targetObjectName") or command.get("objectName")
