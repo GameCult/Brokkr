@@ -19,6 +19,7 @@ from .blender_target import (
     TOOL_KIND,
     BrokkrBlenderTarget,
 )
+from .server_guard import BindRefused
 
 _target = None
 
@@ -84,6 +85,18 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         min=0,
         max=65535,
         description="Port for the Blender CultMesh server; 0 asks the OS for a free port",
+    )
+
+    allow_non_loopback: bpy.props.BoolProperty(
+        name="Allow Non-Loopback Bind",
+        default=False,
+        description="Let the server bind an address other than loopback (for example 0.0.0.0), which exposes it beyond this machine. Set by hand; Start Server refuses a non-loopback Serve Host without it",
+    )
+
+    require_session_token: bpy.props.BoolProperty(
+        name="Require Session Token",
+        default=False,
+        description="Optional. Generate a random token at Start Server, show it in the panel, and reject any document put or delete that lacks it in the sessionToken field. Off by default; the token is never saved",
     )
 
     max_snapshot_documents: bpy.props.IntProperty(
@@ -260,6 +273,8 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "auto_drain_commands")
         layout.prop(self, "serve_host")
         layout.prop(self, "serve_port")
+        layout.prop(self, "allow_non_loopback")
+        layout.prop(self, "require_session_token")
         layout.prop(self, "max_snapshot_documents")
         layout.prop(self, "max_snapshot_bytes")
         layout.prop(self, "sync_session_id")
@@ -307,6 +322,16 @@ class BROKKR_PT_status(bpy.types.Panel):
         layout.label(text=f"Node: {adapter.resolve_cache_path(prefs.cultmesh_cache_path)}")
         server = adapter.server_status()
         layout.label(text=f"Server: {server['endpoint'] if server['running'] else 'stopped'}")
+        if server["running"]:
+            layout.label(text=f"Bind: {server['host']}:{server['port']}")
+            layout.label(text=f"cultlib_py_src: {server['cultlibPySrc']}")
+            if not server["loopback"]:
+                warning = layout.box()
+                warning.alert = True
+                warning.label(text="WARNING: bound beyond loopback; reachable from the network", icon="ERROR")
+            if server["tokenRequired"]:
+                layout.label(text="Session token (send as sessionToken on every put):")
+                layout.label(text=adapter.session_token)
 
         row = layout.row(align=True)
         row.operator("brokkr.capture_snapshot", icon="FILE_REFRESH")
@@ -425,14 +450,21 @@ class BROKKR_OT_start_server(bpy.types.Operator):
 
     def execute(self, context):
         prefs = context.preferences.addons[__name__].preferences
-        status = target().start_server(
-            prefs.cultmesh_cache_path,
-            prefs.cultlib_py_src,
-            prefs.serve_host,
-            prefs.serve_port,
-            prefs.max_snapshot_documents,
-            prefs.max_snapshot_bytes,
-        )
+        try:
+            status = target().start_server(
+                prefs.cultmesh_cache_path,
+                prefs.cultlib_py_src,
+                prefs.serve_host,
+                prefs.serve_port,
+                prefs.max_snapshot_documents,
+                prefs.max_snapshot_bytes,
+                prefs.debug_mirror_root,
+                prefs.allow_non_loopback,
+                prefs.require_session_token,
+            )
+        except BindRefused as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
         self.report({"INFO"}, f"Brokkr Blender server: {status['endpoint']}")
         return {"FINISHED"}
 
