@@ -331,8 +331,7 @@ class BROKKR_PT_status(bpy.types.Panel):
                 warning.alert = True
                 warning.label(text="WARNING: bound beyond loopback; reachable from the network", icon="ERROR")
             if server["tokenRequired"]:
-                layout.label(text="Session token (send as sessionToken on every put):")
-                layout.label(text=adapter.session_token)
+                layout.label(text="Session token required (sessionToken on every put):")
                 layout.operator("brokkr.copy_session_token", icon="COPYDOWN")
 
         row = layout.row(align=True)

@@ -329,6 +329,32 @@ class RealServerTests(unittest.TestCase):
         self.assertNotIn(token, repr(node.database.snapshot()))
         self.assertNotIn(token.encode(), msgpack.packb(log, use_bin_type=True))
 
+    def test_a_delete_with_a_shard_id_and_a_valid_token_leaves_no_token_in_the_shard_log(self):
+        import msgpack
+        self.start(require_token=True)
+        token = self.target.session_token
+        node, _ = self.target._open_node(self.cache, PACKAGES)
+        cultmesh, cultcache = bt._load_cultmesh(PACKAGES)
+        scratch = cultmesh.CultMesh.start_node(str(Path(self.tmp.name) / "scratch2.ccmp"), runtime_id="scratch2")
+        document = cultcache.define_document_type(bt.COMMAND_INTENT_SCHEMA)
+        scratch.database.register_document(document)
+        put = scratch.database.put_raw_message(
+            document, "blender/commands/d1",
+            {"schema": bt.COMMAND_INTENT_SCHEMA, "commandId": "d1", "action": "createObject"},
+            message_id="m1", shard_id="shard-b", shard_epoch=1)
+        delete = scratch.database.delete_raw_message(document, "blender/commands/d1", message_id="m2",
+                                                     shard_id="shard-b", shard_epoch=1)
+        server = self.target._server
+        for message in (put, delete):
+            wire = message.to_wire()
+            wire[sg.TOKEN_FIELD] = token
+            responses = server._handle_connection_message(wire, {})
+            self.assertFalse([r for r in responses if r.get("schemaVersion") == "cultnet.error.v0"], responses)
+        log = node.database.create_shard_log_response(shard_id="shard-b", shard_epoch=1)
+        self.assertIn("document_delete", repr(log))
+        self.assertNotIn(sg.TOKEN_FIELD, repr(log))
+        self.assertNotIn(token.encode(), msgpack.packb(log, use_bin_type=True))
+
     def test_non_loopback_bind_is_refused_before_anything_starts(self):
         with self.assertRaises(sg.BindRefused):
             self.target.start_server(self.cache, PACKAGES, "0.0.0.0", 0, 100, 1 << 20, self.debug)

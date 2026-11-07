@@ -45,7 +45,7 @@ Always on:
 Opt-in, default off: `Require Session Token`. This is internal infrastructure
 and the machine's owner judged per-write access control not worth the friction
 by default. When ticked, `Start Server` generates a random token (`secrets`),
-the panel shows it (`Copy Session Token` puts it on the clipboard), and the server rejects every document put and delete whose
+the panel offers `Copy Session Token` (the token is never drawn on screen), and the server rejects every document put and delete whose
 message lacks it in a top-level `sessionToken` field. It is checked on every
 write, not only at connect. Reads stay open. `Stop Server`, quitting, or
 disabling the add-on revokes it; it is held in memory only and never saved to
