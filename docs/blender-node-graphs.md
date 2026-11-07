@@ -20,6 +20,11 @@ animation/driver authoring on node values, simulation and repeat *zones* (they n
 paired nodes; see Open questions), baking, add-on node packs, and anything that
 executes user code.
 
+Worked examples from real setups, with the design gaps they exposed, are in
+[`blender-node-graph-examples.md`](blender-node-graph-examples.md). Its gaps 1 to 4
+(item sockets, zones, field-ness on interface sockets, multi-input sockets) change
+this document's contract and are to be folded in before cut 1.
+
 ## Tree kinds and owners
 
 A **tree** is addressed by `treeKind` and `treeKey`. The owner decides where the
@@ -274,7 +279,7 @@ the repo, run by a human or on a runner with Blender):
 
 | area | Blender 3.x | 4.0 to 4.x | 5.x |
 |---|---|---|---|
-| group interface | `tree.inputs/outputs` | `tree.interface.new_socket(...)` | same as 4.x |
+| group interface | `tree.inputs/outputs` | `tree.interface.new_socket(...)` | same as 4.x (a Blender 5.1.1 translation corpus used it; Blender 5.2.3 LTS is installed on the Starfire workstation and can check the rest) |
 | material/world tree | `use_nodes = True` then `node_tree` | same | `use_nodes` is deprecated and trees may always exist; confirm |
 | compositor tree | `scene.use_nodes`, `scene.node_tree` | same | the scene's tree becomes a node group on the scene (`compositing_node_group`); confirm |
 | geometry nodes zones | none | 3.6 simulation, 4.0 repeat | same |
@@ -314,7 +319,9 @@ Each cut is its own PR with tests that fail when its rule breaks.
    smoke to see which is more faithful.
 3. **Zones.** Simulation and repeat zones come as input/output node pairs
    (`pair_with_output`). Excluded in v1; admitting them needs a paired-add op and a
-   paired-remove rule.
+   paired-remove rule. The worked examples show this is not optional for geometry
+   nodes: the index-of-nearest and raycast setups are inert helpers without a zone
+   (examples, gap 2). Recommend promoting zones into v1 as `addZone`.
 4. **Where node ids are stored** if a future Blender removes custom properties on
    nodes: fall back to `node.name` only and accept that a UI rename breaks addressing.
 5. **Packaging of the exclusion list** as a versioned typed document the daemon can

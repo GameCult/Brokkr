@@ -52,7 +52,8 @@ createNodeGroup geometry "Grass Tuft Generator" interface=[
 # seed surface
 addNode disc     GeometryNodeMeshCircle        properties{fill_type: TRIANGLE_FAN} inputs{Vertices: 12}
 addNode sub      GeometryNodeSubdivideMesh     inputs{Level: 3}
-addNode pos1     GeometryNodeInputPosition
+addNode pos1     GeometryNodeInputPosition                          # radial distance
+addNode pos2     GeometryNodeInputPosition                          # captured on the instance domain
 addNode rlen     ShaderNodeVectorMath          properties{operation: LENGTH}
 addNode falloff  ShaderNodeMapRange            properties{data_type: FLOAT, interpolation_type: SMOOTHSTEP, clamp: true}
                                                inputs{"From Min": 0, "To Min": 1.0, "To Max": 0.39}
@@ -96,7 +97,7 @@ addNode smooth   GeometryNodeSetShadeSmooth       properties{domain: FACE} input
 addNode mat      GeometryNodeSetMaterial
 ```
 
-Links (the wiring, 44 in all; the group inputs fan out):
+Links (the wiring, about 45; the group inputs fan out):
 
 ```text
 gin.Radius -> disc.Radius          disc.Mesh -> sub.Mesh
@@ -119,8 +120,7 @@ rsw.Output -> c2m.Scale            c2m.Mesh -> smooth.Mesh            smooth.Mes
 mat.Geometry -> gout.Geometry
 ```
 
-(`pos2` is a third `GeometryNodeInputPosition` evaluated on the instance domain; it and
-the omitted node lines follow the same pattern.) About 38 nodes and 44 links.
+About 40 nodes and 45 links; the counts are from reading the script, not from Blender.
 
 **Expressible:** everything except the capture item. **Needs:**
 
@@ -211,11 +211,10 @@ fwd.Vector->turn.Vector   gin.Rotation->turn.Rotation   turn.Vector->gout.Direct
 `Distance`), `ShaderNodeVectorMath` SCALE 0.999, `GeometryNodeSetPosition` at `Hit Index`,
 `ShaderNodeVectorMath` REFLECT, `ShaderNodeMath` ADD and `+1` for the index.
 
-**Expressible:** all three helpers. **Needs:** **GAP 2** (one Cast Rays per bounce lives
-in a Repeat zone in the full graph); **GAP 6** for the object reference
-(`ref(object)` is in the design, but an Object Info node's *object* input is a socket
-default the document must type as a reference, which it does, so this one is covered);
-the legacy **Euler vector socket** `rotation_type` enum differs by node type (verify).
+**Expressible:** all three helpers, including the target object, which is a
+`ref(object, name)` default on the Object Info node. **Needs:** **GAP 2** (the full
+graph runs one Cast Rays per bounce inside a Repeat zone). The Euler/axis `rotation_type`
+enum values differ by node type and are read from the running Blender, not assumed.
 
 ## 4. Shortest-path labyrinth
 
