@@ -598,8 +598,8 @@ class BrokkrBlenderTarget:
         path = sa.resolve_inside(self.import_dir, name, "import")
         sa.require_gltf(path)
         stamped = sa.fingerprint([path])  # before the parse, so a swap during it shows
-        references = sa.gltf_references(path, self.import_dir)
-        existing = [r for r in references if r.exists()]
+        references = sa.gltf_references(path)
+        existing = references  # gltf_references refuses a missing one
         checked = (stamped, sa.fingerprint(existing))
         # Re-check immediately before use: the same path, the same files, the same bytes' stats.
         # Blender then opens the files itself, so a swap in that last gap is not prevented
@@ -711,13 +711,6 @@ class BrokkrBlenderTarget:
         # Render settings are the intent's for this render only; put them back afterwards.
         saved = (render.engine, render.resolution_x, render.resolution_y, render.filepath,
                  render.image_settings.file_format, scene.camera)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Re-check after the folders exist and immediately before use: no link was swapped in,
-        # and the name is still free. Blender opens the file itself afterwards, so a swap in
-        # that last gap is not prevented (residual TOCTOU): the output directory must only
-        # be writable by trusted users.
-        if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
-            raise sa.ActionRefused("Output path changed while it was being checked.")
         try:
             if engine is not None:
                 try:
@@ -732,6 +725,14 @@ class BrokkrBlenderTarget:
                 scene.camera = camera
             render.filepath = str(path)
             render.image_settings.file_format = file_format
+            # Folders are made only after every refusal that can still come from Blender (an unknown
+            # engine), so a refused render leaves none behind. Then re-check after the folders exist
+            # and immediately before use: no link was swapped in, and the name is still free. Blender
+            # opens the file itself afterwards, so a swap in that last gap is not prevented (residual
+            # TOCTOU): the output directory must only be writable by trusted users.
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
+                raise sa.ActionRefused("Output path changed while it was being checked.")
             self.bpy.ops.render.render(write_still=True)
         finally:
             (render.engine, render.resolution_x, render.resolution_y, render.filepath,

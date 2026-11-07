@@ -298,7 +298,23 @@ class ActionTests(unittest.TestCase):
         except OSError:
             self.skipTest("symlinks unavailable")
         self.write_gltf("link.gltf", {"asset": {"version": "2.0"}, "buffers": [{"uri": "buf.bin"}]})
-        self.assertEqual(self.run_action(action="importGltf", filepath="link.gltf")["status"], "failed")
+        receipt = self.run_action(action="importGltf", filepath="link.gltf")
+        self.assertEqual(receipt["status"], "failed")
+        self.assertIn("link", receipt["message"])  # the rule that fired, not a generic "outside"
+        self.assertEqual(self.bpy.imported, [])
+
+    def test_gltf_reference_to_a_missing_file_is_refused(self):
+        try:
+            os.symlink(self.root / "nowhere.bin", self.root / "in" / "dangling.bin")
+            dangling = True
+        except OSError:
+            dangling = False
+        for kind in ("buffers", "images"):
+            for uri in ["absent.bin", "sub/absent.png"] + (["dangling.bin"] if dangling else []):
+                self.write_gltf("miss.gltf", {"asset": {"version": "2.0"}, kind: [{"uri": uri}]})
+                receipt = self.run_action(action="importGltf", filepath="miss.gltf")
+                self.assertEqual(receipt["status"], "failed", (kind, uri))
+                self.assertRegex(receipt["message"], "does not exist|link", (kind, uri))
         self.assertEqual(self.bpy.imported, [])
 
     def test_malformed_gltf_is_refused(self):
@@ -315,8 +331,8 @@ class ActionTests(unittest.TestCase):
         target_file = self.root / "in" / "model.glb"
         original = sa.gltf_references
 
-        def swap_after_check(path, root):
-            result = original(path, root)
+        def swap_after_check(path):
+            result = original(path)
             target_file.write_bytes(glb_bytes({"asset": {"version": "2.0"}, "extras": "x" * 50}))
             return result
         with mock.patch.object(sa, "gltf_references", swap_after_check):
@@ -352,6 +368,17 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(self.run_action(action="renderStill", outputPath="dir/a.png")["status"], "failed")
         self.assertEqual(self.bpy.rendered, [])
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_a_refused_render_leaves_no_folders_behind(self):
+        (self.root / "out" / "taken").mkdir()
+        (self.root / "out" / "taken" / "a.png").write_bytes(b"x")
+        for case in ({"outputPath": "new/deep/a.png", "resolutionX": 0}, {"outputPath": "new/deep/a.png", "engine": ""}, {"outputPath": "new/deep/a.png", "engine": "NOPE"},
+                     {"outputPath": "new/deep/a.png", "cameraName": "Nope"}, {"outputPath": "new/deep/a.txt"},
+                     {"outputPath": "taken/a.png"}):
+            self.assertEqual(self.run_action(action="renderStill", **case)["status"], "failed", case)
+        self.assertIn("already exists", self.run_action(action="renderStill", outputPath="taken/a.png")["message"])
+        self.assertEqual(sorted(p.name for p in (self.root / "out").iterdir()), ["taken"])
+        self.assertEqual(self.bpy.rendered, [])
 
     def test_render_refuses_drive_unc_extended_stream_and_device_names(self):
         for name in ("C:a.png", "C:\\a.png", "\\\\host\\share\\a.png", "\\\\?\\C:\\a.png", "a.png:stream",
@@ -390,6 +417,15 @@ class PathTests(unittest.TestCase):
             for name in ("a/../b.png", "a/../../b.png", "..", "", "."):
                 with self.assertRaises(sa.ActionRefused, msg=name):
                     sa.resolve_inside(tmp, name, "output")
+
+    def test_check_relative_refuses_device_names_however_windows_spells_them(self):
+        # Windows drops spaces before the first dot (CON .txt is CON) and reads superscript digits as COM/LPT digits.
+        for name in ("CON", "con", "CON .txt", "NUL .png", "sub/NUL  .png", "COM1", "COM\u00b9", "LPT\u00b2.txt", "LPT\u00b3",
+                     "CONIN$", "a/PRN.tar.gz"):
+            with self.assertRaisesRegex(sa.ActionRefused, "device", msg=name):
+                sa.check_relative(name, "output")
+        for name in ("CONSOLE.png", "COM10.png", "com.png", "a.CON.png", "NULL"):
+            sa.check_relative(name, "output")
 
     def test_check_relative_itself_refuses_dotdot_and_nul(self):
         # Each rule on its own: resolve_inside's link walk also trips on '..', so only a

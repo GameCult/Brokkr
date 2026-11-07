@@ -28,7 +28,7 @@ class ActionRefused(ValueError):
 
 WINDOWS_DEVICE_NAMES = frozenset(
     ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
-    + [f"COM{i}" for i in range(1, 10)] + [f"LPT{i}" for i in range(1, 10)]
+    + [f"COM{i}" for i in "123456789\u00b9\u00b2\u00b3"] + [f"LPT{i}" for i in "123456789\u00b9\u00b2\u00b3"]
 )
 MAX_GLTF_JSON_BYTES = 16 * 1024 * 1024
 
@@ -58,7 +58,8 @@ def check_relative(candidate: str, label: str) -> list[str]:
             raise ActionRefused(f"{label} path may not contain '..'.")
         if part[-1] in ". ":
             raise ActionRefused(f"{label} path component {part!r} ends in a dot or space.")
-        if part.split(".")[0].upper() in WINDOWS_DEVICE_NAMES:
+        # Windows reads "CON .txt" as CON: trailing spaces before the first dot do not count.
+        if part.split(".")[0].rstrip(" ").upper() in WINDOWS_DEVICE_NAMES:
             raise ActionRefused(f"{label} path component {part!r} is a Windows device name.")
     return parts
 
@@ -110,14 +111,14 @@ def fingerprint(paths: Iterable[Path]) -> tuple:
     return tuple(out)
 
 
-def gltf_references(path: Path, root: str) -> list[Path]:
-    """Every external file a .gltf or .glb names, checked to lie under root; [] for self-contained.
+def gltf_references(path: Path) -> list[Path]:
+    """Every external file a .gltf or .glb names, checked to exist inside path's folder; [] for self-contained.
 
     Parses the glTF JSON (the .gltf file, or a .glb's first chunk) and takes every
     buffers[].uri and images[].uri. A data: URI is inline and fine. Anything else is
     percent-decoded and must pass check_relative (so file:, http:, drive, UNC, rooted and
-    .. forms are refused), then resolve under the .gltf's own folder and stay under root
-    with no link on the way."""
+    .. forms are refused), then resolve under the .gltf's own folder (itself already checked under the import root)
+    with no link on the way, and must exist."""
     raw = path.read_bytes() if path.suffix.lower() == ".gltf" else _glb_json_chunk(path)
     if len(raw) > MAX_GLTF_JSON_BYTES:
         raise ActionRefused("glTF JSON is too large to check.")
@@ -129,7 +130,6 @@ def gltf_references(path: Path, root: str) -> list[Path]:
         raise ActionRefused("Import file is not a glTF object.")
     references: list[Path] = []
     here = path.parent.resolve()
-    base = Path(root).resolve()
     for kind in ("buffers", "images"):
         entries = document.get(kind, [])
         if not isinstance(entries, list):
@@ -144,11 +144,10 @@ def gltf_references(path: Path, root: str) -> list[Path]:
                 continue
             decoded = unquote(uri)
             relative = "/".join(check_relative(decoded, f"glTF {kind} uri"))
-            try:
-                target = resolve_inside(str(here), relative, f"glTF {kind} uri")
-                target.resolve().relative_to(base)
-            except ValueError:
-                raise ActionRefused(f"glTF {kind} uri is outside the import directory.") from None
+            # path is already under root, so here is too, and resolve_inside keeps the reference under here.
+            target = resolve_inside(str(here), relative, f"glTF {kind} uri")
+            if not target.exists():
+                raise ActionRefused(f"glTF {kind} uri names a file that does not exist: {relative}")
             references.append(target)
     return references
 
