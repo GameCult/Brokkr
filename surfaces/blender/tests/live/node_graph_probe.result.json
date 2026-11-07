@@ -1,0 +1,560 @@
+{
+ "blender": "5.2.3 LTS",
+ "checks": [
+  {
+   "name": "interface_identifier_is_opaque",
+   "ok": true,
+   "detail": "Socket_0"
+  },
+  {
+   "name": "group_output_socket_identifier_equals_interface",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "evaluated_counts_cube",
+   "ok": true,
+   "detail": [
+    8,
+    12,
+    6,
+    24
+   ]
+  },
+  {
+   "name": "evaluated_attributes_listed",
+   "ok": true,
+   "detail": [
+    ".corner_edge",
+    ".corner_vert",
+    ".edge_verts",
+    "position",
+    "sharp_face"
+   ]
+  },
+  {
+   "name": "pair_with_output:Repeat",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "repeat_default_item_is_geometry",
+   "ok": true,
+   "detail": [
+    "Geometry"
+   ]
+  },
+  {
+   "name": "modifier_legacy_idprop_access_absent",
+   "ok": true,
+   "detail": false
+  },
+  {
+   "name": "repeat_runs_3_times",
+   "ok": true,
+   "detail": [
+    3.0,
+    3.0
+   ]
+  },
+  {
+   "name": "modifier_input_change_without_update_tag_is_stale_in_background",
+   "ok": true,
+   "detail": [
+    3.0,
+    3.0
+   ]
+  },
+  {
+   "name": "repeat_runs_5_times_after_modifier_input",
+   "ok": true,
+   "detail": [
+    5.0,
+    5.0
+   ]
+  },
+  {
+   "name": "repeat_item_identifier_both_nodes",
+   "ok": true,
+   "detail": [
+    "Iterations",
+    "Item_0",
+    "Item_1",
+    "__extend__"
+   ]
+  },
+  {
+   "name": "repeat_input_first_output_is_Iteration",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "capture_item_sockets",
+   "ok": true,
+   "detail": [
+    "Geometry",
+    "Selection",
+    "Value",
+    "__extend__",
+    "Geometry",
+    "Selection",
+    "Attribute",
+    "__extend__"
+   ]
+  },
+  {
+   "name": "capture_roundtrip_attribute_present",
+   "ok": true,
+   "detail": [
+    [
+     ".corner_edge",
+     ".corner_vert",
+     ".edge_verts",
+     "position",
+     "sharp_face",
+     "was"
+    ],
+    [
+     5.0,
+     5.0
+    ]
+   ]
+  },
+  {
+   "name": "join_geometry_input_is_multi",
+   "ok": true,
+   "detail": 4095
+  },
+  {
+   "name": "multi_input_sort_ids_follow_link_creation_order",
+   "ok": true,
+   "detail": [
+    [
+     true,
+     0
+    ],
+    [
+     false,
+     1
+    ],
+    [
+     false,
+     2
+    ]
+   ]
+  },
+  {
+   "name": "join_evaluates_in_reverse_link_order",
+   "ok": true,
+   "detail": [
+    10.0,
+    0.0,
+    523
+   ]
+  },
+  {
+   "name": "identical_link_into_multi_input_not_duplicated",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "interface_structure_type_field_roundtrips",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "field_into_group_field_input_evaluates_per_element",
+   "ok": true,
+   "detail": [
+    [
+     -1.0774,
+     -1.0774,
+     -1.0774
+    ],
+    [
+     1.0774,
+     -1.0774,
+     -1.0774
+    ]
+   ]
+  },
+  {
+   "name": "field_into_single_value_socket_is_invalid_link_or_flagged",
+   "ok": true,
+   "detail": {
+    "is_valid": false,
+    "note": "Size is a single-value socket"
+   }
+  },
+  {
+   "name": "field_into_geometry_socket_invalid",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "library_essentials_asset_group_linked",
+   "ok": true,
+   "detail": {
+    "assets": 28,
+    "linked": "Array",
+    "read_only": true
+   }
+  },
+  {
+   "name": "library_group_interface_identifiers_are_opaque",
+   "ok": true,
+   "detail": [
+    [
+     "Socket_0",
+     "Geometry",
+     "OUTPUT"
+    ],
+    [
+     "Socket_7",
+     "Geometry",
+     "INPUT"
+    ],
+    [
+     "Socket_2",
+     "Shape",
+     "INPUT"
+    ],
+    [
+     "Socket_33",
+     "Count Method",
+     "INPUT"
+    ],
+    [
+     "Socket_5",
+     "Count",
+     "INPUT"
+    ],
+    [
+     "Socket_34",
+     "Distance",
+     "INPUT"
+    ],
+    [
+     "Socket_37",
+     "Angular Distance",
+     "INPUT"
+    ],
+    [
+     "Socket_35",
+     "Per Curve",
+     "INPUT"
+    ],
+    [
+     "Socket_14",
+     "Offset Method",
+     "INPUT"
+    ],
+    [
+     "Socket_25",
+     "Transform Reference",
+     "INPUT"
+    ],
+    [
+     "Socket_8",
+     "Translation",
+     "INPUT"
+    ],
+    [
+     "Socket_21",
+     "Offset",
+     "INPUT"
+    ],
+    [
+     "Socket_9",
+     "Rotation",
+     "INPUT"
+    ],
+    [
+     "Socket_10",
+     "Scale",
+     "INPUT"
+    ],
+    [
+     "Socket_11",
+     "Central Axis",
+     "INPUT"
+    ],
+    [
+     "Socket_29",
+     "Circle Segment",
+     "INPUT"
+    ],
+    [
+     "Socket_28",
+     "Sweep Angle",
+     "INPUT"
+    ],
+    [
+     "Socket_6",
+     "Radius",
+     "INPUT"
+    ],
+    [
+     "Socket_24",
+     "Transform Object",
+     "INPUT"
+    ],
+    [
+     "Socket_27",
+     "Curve Object",
+     "INPUT"
+    ],
+    [
+     "Socket_26",
+     "Relative Space",
+     "INPUT"
+    ],
+    [
+     "Socket_38",
+     "Realize Instances",
+     "INPUT"
+    ],
+    [
+     "Socket_12",
+     "Align Rotation",
+     "INPUT"
+    ],
+    [
+     "Socket_50",
+     "Local Rotation",
+     "INPUT"
+    ],
+    [
+     "Socket_17",
+     "Randomize",
+     "INPUT"
+    ],
+    [
+     "Socket_42",
+     "Randomize Offset",
+     "INPUT"
+    ],
+    [
+     "Socket_15",
+     "Randomize Rotation",
+     "INPUT"
+    ],
+    [
+     "Socket_43",
+     "Randomize Scale Axes",
+     "INPUT"
+    ],
+    [
+     "Socket_19",
+     "Randomize Scale",
+     "INPUT"
+    ],
+    [
+     "Socket_44",
+     "Randomize Scale",
+     "INPUT"
+    ],
+    [
+     "Socket_45",
+     "Randomize Flipping",
+     "INPUT"
+    ],
+    [
+     "Socket_22",
+     "Exclude First",
+     "INPUT"
+    ],
+    [
+     "Socket_46",
+     "Exclude Last",
+     "INPUT"
+    ],
+    [
+     "Socket_18",
+     "Seed",
+     "INPUT"
+    ],
+    [
+     "Socket_31",
+     "Merge",
+     "INPUT"
+    ],
+    [
+     "Socket_32",
+     "Merge Distance",
+     "INPUT"
+    ]
+   ]
+  },
+  {
+   "name": "group_node_inputs_by_interface_name_resolvable",
+   "ok": true,
+   "detail": [
+    "Geometry",
+    "Shape",
+    "Count Method",
+    "Count",
+    "Distance",
+    "Angular Distance",
+    "Per Curve",
+    "Offset Method",
+    "Transform Reference",
+    "Translation",
+    "Offset",
+    "Rotation",
+    "Scale",
+    "Central Axis",
+    "Circle Segment",
+    "Sweep Angle",
+    "Radius",
+    "Transform Object",
+    "Curve Object",
+    "Relative Space",
+    "Realize Instances",
+    "Align Rotation",
+    "Local Rotation",
+    "Randomize",
+    "Randomize Offset",
+    "Randomize Rotation",
+    "Randomize Scale Axes",
+    "Randomize Scale",
+    "Randomize Flipping",
+    "Exclude First",
+    "Exclude Last",
+    "Seed",
+    "Merge",
+    "Merge Distance"
+   ]
+  },
+  {
+   "name": "library_group_evaluates",
+   "ok": true,
+   "detail": [
+    24,
+    36,
+    18,
+    72
+   ]
+  },
+  {
+   "name": "linked_group_is_id_library_user",
+   "ok": true,
+   "detail": [
+    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Blender\\5.2\\datafiles\\assets\\nodes\\geometry_nodes_essentials.blend"
+   ]
+  },
+  {
+   "name": "linked_group_is_not_editable",
+   "ok": true,
+   "detail": false
+  },
+  {
+   "name": "example2_boundary_step_pulls_outside_points_to_B",
+   "ok": true,
+   "detail": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "evaluated_geometry_api_exposes_curves",
+   "ok": true,
+   "detail": {
+    "mesh": true,
+    "curves": true,
+    "pointcloud": false,
+    "volume": false,
+    "instances": false
+   }
+  },
+  {
+   "name": "evaluated_mesh_of_curve_result_is_empty",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "modifier_has_node_warnings_collection",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "name": "second_capture_item_identifiers",
+   "ok": true,
+   "detail": [
+    [
+     "Geometry",
+     "Selection",
+     "Value",
+     "Value_1",
+     "__extend__"
+    ],
+    [
+     "Geometry",
+     "Selection",
+     "Attribute",
+     "Attribute_1",
+     "__extend__"
+    ]
+   ]
+  },
+  {
+   "name": "poisson_sockets_always_exist_availability_flips",
+   "ok": true,
+   "detail": {
+    "before": {
+     "Mesh": false,
+     "Selection": false,
+     "Distance Min": true,
+     "Density Max": true,
+     "Density": false,
+     "Density Factor": true,
+     "Seed": false
+    },
+    "after": {
+     "Mesh": false,
+     "Selection": false,
+     "Distance Min": false,
+     "Density Max": false,
+     "Density": true,
+     "Density Factor": false,
+     "Seed": false
+    }
+   }
+  },
+  {
+   "name": "float_into_vector_socket_link_valid",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "switch_identifiers_stable_across_types",
+   "ok": true,
+   "detail": [
+    "Switch",
+    "False",
+    "True"
+   ]
+  },
+  {
+   "name": "compare_int_identifiers",
+   "ok": true,
+   "detail": [
+    "A",
+    "B"
+   ]
+  }
+ ]
+}
