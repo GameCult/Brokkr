@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import scene_actions as sa
+from .server_guard import BindRefused, SessionGuard, check_bind, guarded_server_class, is_loopback_host, purge_command_intents
 
 PROVIDER_ID = "brokkr.blender_editor"
 TOOL_KIND = "blender-editor"
@@ -67,6 +68,9 @@ class BrokkrBlenderTarget:
         self._documents: dict[str, Any] | None = None
         self._server_key: tuple[str, str, str, str, int, int, int] | None = None
         self._server: Any | None = None
+        self._guard: SessionGuard | None = None
+        self._cultmesh_module: str = ""
+        self._debug_mirror_root: str = ""
         self.import_dir: str = ""
         self.output_dir: str = ""
 
@@ -305,9 +309,17 @@ class BrokkrBlenderTarget:
         port: int,
         max_snapshot_documents: int,
         max_snapshot_bytes: int,
+        debug_mirror_root: str = "",
+        allow_non_loopback: bool = False,
+        require_token: bool = False,
     ) -> dict[str, Any]:
+        try:
+            resolved_host = check_bind(host, allow_non_loopback)
+        except BindRefused:
+            self.enforce_bind_policy(allow_non_loopback)
+            raise
+        self.enforce_bind_policy(allow_non_loopback)
         node, documents = self._open_node(cache_path, cultlib_py_src)
-        resolved_host = host or "127.0.0.1"
         server_key = (
             self.resolve_cache_path(cache_path),
             str(Path(cultlib_py_src or DEFAULT_CULTLIB_PY_SRC)),
@@ -316,16 +328,25 @@ class BrokkrBlenderTarget:
             int(port),
             int(max_snapshot_documents),
             int(max_snapshot_bytes),
+            bool(require_token),
         )
         if self._server is not None and self._server_key == server_key:
             return self.server_status()
 
         self.stop_server()
+        self._cultmesh_module = ""
+        self._debug_mirror_root = self.resolve_debug_mirror_root(debug_mirror_root) if debug_mirror_root else ""
+        purge_command_intents(node, documents["command_intent"], COMMAND_INTENT_SCHEMA, self._debug_mirror_root)
         cultmesh, _cultcache = _load_cultmesh(cultlib_py_src)
+        self._cultmesh_module = str(getattr(cultmesh, "__file__", "") or "")
         verse_catalog = cultmesh.CultMesh.create_verse_catalog()
         peer_catalog = cultmesh.CultMesh.create_peer_catalog()
-        server = cultmesh.CultMesh.serve_node(
-            node,
+        server_class = cultmesh.CultMeshLocalServer
+        guard = SessionGuard() if require_token else None
+        if guard is not None:
+            server_class = guarded_server_class(server_class, guard)
+        server = server_class(
+            node=node,
             verse_catalog=verse_catalog,
             peer_catalog=peer_catalog,
             host=resolved_host,
@@ -333,7 +354,7 @@ class BrokkrBlenderTarget:
             display_name="Brokkr Blender Editor",
             max_snapshot_documents=int(max_snapshot_documents),
             max_snapshot_bytes=int(max_snapshot_bytes),
-        )
+        ).start()
 
         endpoint = f"cultnet://{resolved_host}:{server.port}"
         verse_catalog.upsert(cultmesh.CultMeshVerseDescriptor(
@@ -359,13 +380,36 @@ class BrokkrBlenderTarget:
 
         self._server = server
         self._server_key = server_key
+        self._guard = guard
         return self.server_status()
 
+    def enforce_bind_policy(self, allow_non_loopback: bool) -> None:
+        """Stop a running server that is bound beyond loopback when the allow is not set."""
+        if self._server is not None and not allow_non_loopback and not is_loopback_host(self._server.host):
+            self.stop_server()
+
     def stop_server(self) -> None:
-        if self._server is not None:
-            self._server.stop()
-        self._server = None
-        self._server_key = None
+        was_running = self._server is not None
+        try:
+            if was_running:
+                self._server.stop()
+        finally:
+            try:
+                if self._guard is not None:
+                    self._guard.revoke()
+            finally:
+                try:
+                    if was_running and self._node is not None:
+                        purge_command_intents(self._node, self._documents["command_intent"], COMMAND_INTENT_SCHEMA, self._debug_mirror_root)
+                finally:
+                    self._server = None
+                    self._server_key = None
+                    self._guard = None
+
+    @property
+    def session_token(self) -> str:
+        """The running server's token, or "" when the server is stopped or the token is off."""
+        return self._guard.token if self._guard is not None else ""
 
     def server_status(self) -> dict[str, Any]:
         if self._server is None:
@@ -374,12 +418,18 @@ class BrokkrBlenderTarget:
                 "endpoint": "",
                 "host": "",
                 "port": 0,
+                "loopback": True,
+                "tokenRequired": False,
+                "cultmeshModule": "",
             }
         return {
             "running": True,
             "endpoint": f"cultnet://{self._server.host}:{self._server.port}",
             "host": self._server.host,
             "port": self._server.port,
+            "loopback": is_loopback_host(self._server.host),
+            "tokenRequired": self._guard is not None,
+            "cultmeshModule": self._cultmesh_module,
         }
 
     def capture_snapshot(self, context: Any) -> dict[str, Any]:
