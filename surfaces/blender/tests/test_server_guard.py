@@ -92,6 +92,13 @@ class GuardedServerTests(unittest.TestCase):
         self.assertEqual(self.call({**PUT, sg.TOKEN_FIELD: "wrong"})[0]["schemaVersion"], "cultnet.error.v0")
         self.assertEqual(len(self.server.handled), 2)
 
+    def test_token_is_stripped_before_the_store_sees_the_message(self):
+        for message in (PUT, DELETE):
+            self.call({**message, sg.TOKEN_FIELD: self.guard.token})
+        self.assertEqual(len(self.server.handled), 2)
+        for handled in self.server.handled:
+            self.assertNotIn(sg.TOKEN_FIELD, handled)
+
     def test_reads_need_no_token(self):
         self.assertEqual(self.call(SUBSCRIBE)[0]["schemaVersion"], "handled")
 
@@ -180,6 +187,30 @@ class PurgeTests(unittest.TestCase):
             self.assertFalse(guard.admits({sg.TOKEN_FIELD: old}))
             self.assertEqual(target.session_token, "")
 
+    def test_stop_server_revokes_and_purges_even_when_the_socket_stop_raises(self):
+        target = bt.BrokkrBlenderTarget(types.SimpleNamespace())
+
+        def boom():
+            raise OSError("close failed")
+        target._server = types.SimpleNamespace(stop=boom)
+        target._guard = sg.SessionGuard()
+        guard = target._guard
+        old = guard.token
+        target._node = FakeNode(["c1"])
+        target._documents = {"command_intent": "DOC"}
+        with self.assertRaises(OSError):
+            target.stop_server()
+        self.assertFalse(guard.admits({sg.TOKEN_FIELD: old}))
+        self.assertEqual(target._node.database.keys, [])
+        self.assertIsNone(target._server)
+
+    def test_enforce_bind_policy_stops_only_a_non_loopback_server_without_the_allow(self):
+        for host, allow, stays in (("0.0.0.0", False, False), ("0.0.0.0", True, True), ("127.0.0.1", False, True)):
+            target = bt.BrokkrBlenderTarget(types.SimpleNamespace())
+            target._server = types.SimpleNamespace(host=host, stop=lambda: None)
+            target.enforce_bind_policy(allow)
+            self.assertEqual(target._server is not None, stays, (host, allow))
+
     def test_stop_server_with_no_server_running_purges_nothing(self):
         target = bt.BrokkrBlenderTarget(types.SimpleNamespace())
         target._node = FakeNode(["c1"])
@@ -216,7 +247,8 @@ class RealServerTests(unittest.TestCase):
         self.assertFalse(status["tokenRequired"])
         self.assertEqual(self.target.session_token, "")
         self.assertEqual(list((Path(self.debug) / "blender" / "commands").glob("*.json")), [])
-        self.assertEqual(status["cultlibPySrc"], str(Path(PACKAGES)))
+        self.assertTrue(status["cultmeshModule"].endswith("__init__.py"))
+        self.assertIn("cultmesh_py", status["cultmeshModule"])
         self.assertTrue(status["loopback"])
 
     def test_token_on_refuses_unauthenticated_put_on_the_real_server(self):
@@ -228,6 +260,74 @@ class RealServerTests(unittest.TestCase):
         message[sg.TOKEN_FIELD] = self.target.session_token
         response = server._handle_connection_message(message, {})
         self.assertIn("malformed", response[0].get("code", ""))  # past the guard, refused by the store as an empty put
+
+    def queue_intent(self, key="blender/commands/q1"):
+        node, documents = self.target._open_node(self.cache, PACKAGES)
+        node.database.put(documents["command_intent"], key, {
+            "schema": bt.COMMAND_INTENT_SCHEMA, "commandId": "q1", "action": "createObject"})
+        return node, documents
+
+    def queued(self, cache_path):
+        """Intent keys in the .ccmp as a fresh node reads it from disk."""
+        cultmesh, cultcache = bt._load_cultmesh(PACKAGES)
+        fresh = cultmesh.CultMesh.start_node(cache_path, runtime_id="reader")
+        fresh.database.register_document(cultcache.define_document_type(bt.COMMAND_INTENT_SCHEMA))
+        fresh.database.pull()
+        return list(fresh.database.snapshot().get(bt.COMMAND_INTENT_SCHEMA, {}))
+
+    def test_start_purges_intents_queued_in_the_node_and_they_stay_gone_after_reopening(self):
+        self.queue_intent()
+        self.assertEqual(len(self.queued(self.cache)), 1)
+        self.start()
+        node, _ = self.target._open_node(self.cache, PACKAGES)
+        self.assertEqual(list(node.database.snapshot().get(bt.COMMAND_INTENT_SCHEMA, {})), [])
+        self.assertEqual(self.queued(self.cache), [])
+
+    def test_stop_purges_intents_queued_while_running_and_they_stay_gone_after_reopening(self):
+        self.start()
+        self.queue_intent()
+        self.target.stop_server()
+        self.assertEqual(self.queued(self.cache), [])
+
+    def test_allow_true_goes_through_start_server_and_unticking_stops_it(self):
+        status = self.target.start_server(self.cache, PACKAGES, "0.0.0.0", 0, 100, 1 << 20, self.debug,
+                                          allow_non_loopback=True)
+        self.assertTrue(status["running"])
+        self.assertFalse(status["loopback"])
+        with self.assertRaises(sg.BindRefused):
+            self.target.start_server(self.cache, PACKAGES, "0.0.0.0", 0, 100, 1 << 20, self.debug,
+                                     allow_non_loopback=False)
+        self.assertFalse(self.target.server_status()["running"])
+
+    def test_unticking_the_allow_stops_a_running_non_loopback_server(self):
+        self.target.start_server(self.cache, PACKAGES, "0.0.0.0", 0, 100, 1 << 20, self.debug,
+                                 allow_non_loopback=True)
+        self.target.enforce_bind_policy(False)
+        self.assertFalse(self.target.server_status()["running"])
+
+    def test_a_put_with_a_shard_id_and_a_valid_token_leaves_no_token_in_the_shard_log_or_store(self):
+        import msgpack
+        status = self.start(require_token=True)
+        token = self.target.session_token
+        node, documents = self.target._open_node(self.cache, PACKAGES)
+        cultmesh, cultcache = bt._load_cultmesh(PACKAGES)
+        scratch = cultmesh.CultMesh.start_node(str(Path(self.tmp.name) / "scratch.ccmp"), runtime_id="scratch")
+        scratch.database.register_document(cultcache.define_document_type(bt.COMMAND_INTENT_SCHEMA))
+        built = scratch.database.put_raw_message(
+            cultcache.define_document_type(bt.COMMAND_INTENT_SCHEMA), "blender/commands/s1",
+            {"schema": bt.COMMAND_INTENT_SCHEMA, "commandId": "s1", "action": "createObject"},
+            message_id="m1", shard_id="shard-a", shard_epoch=1)
+        wire = built.to_wire()
+        wire[sg.TOKEN_FIELD] = token
+        server = self.target._server
+        responses = server._handle_connection_message(wire, {})
+        self.assertNotEqual(responses and responses[0].get("schemaVersion"), "cultnet.error.v0", responses)
+        log = node.database.create_shard_log_response(shard_id="shard-a", shard_epoch=1)
+        self.assertIn("s1", repr(log))
+        self.assertNotIn(token, repr(log))
+        self.assertNotIn(sg.TOKEN_FIELD, repr(log))
+        self.assertNotIn(token, repr(node.database.snapshot()))
+        self.assertNotIn(token.encode(), msgpack.packb(log, use_bin_type=True))
 
     def test_non_loopback_bind_is_refused_before_anything_starts(self):
         with self.assertRaises(sg.BindRefused):

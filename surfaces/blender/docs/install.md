@@ -35,17 +35,17 @@ Always on:
   `brokkr.blender.command_intent.v0` record in the node and every
   `blender/commands/*.json` under `Debug Export Root`. Intents queued before a
   start never run under the new session.
-- After `Start Server` the panel shows the bind address, port and the
-  `cultlib_py_src` path the server loaded `cultmesh_py` from.
+- After `Start Server` the panel shows the bind address, port and the file
+  `cultmesh_py` was actually loaded from (its `__file__`, not the preference).
 - A `Serve Host` that is not loopback (`0.0.0.0`, a LAN address, a hostname
   other than `localhost`) is refused until `Allow Non-Loopback Bind` is ticked in
   the add-on preferences by hand. While such a server runs the panel shows a
-  warning.
+  warning, and unticking the allow stops it.
 
 Opt-in, default off: `Require Session Token`. This is internal infrastructure
 and the machine's owner judged per-write access control not worth the friction
 by default. When ticked, `Start Server` generates a random token (`secrets`),
-the panel shows it, and the server rejects every document put and delete whose
+the panel shows it (`Copy Session Token` puts it on the clipboard), and the server rejects every document put and delete whose
 message lacks it in a top-level `sessionToken` field. It is checked on every
 write, not only at connect. Reads stay open. `Stop Server`, quitting, or
 disabling the add-on revokes it; it is held in memory only and never saved to

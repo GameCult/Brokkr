@@ -90,6 +90,7 @@ class BrokkrPreferences(bpy.types.AddonPreferences):
     allow_non_loopback: bpy.props.BoolProperty(
         name="Allow Non-Loopback Bind",
         default=False,
+        update=lambda self, context: target().enforce_bind_policy(self.allow_non_loopback),
         description="Let the server bind an address other than loopback (for example 0.0.0.0), which exposes it beyond this machine. Set by hand; Start Server refuses a non-loopback Serve Host without it",
     )
 
@@ -324,7 +325,7 @@ class BROKKR_PT_status(bpy.types.Panel):
         layout.label(text=f"Server: {server['endpoint'] if server['running'] else 'stopped'}")
         if server["running"]:
             layout.label(text=f"Bind: {server['host']}:{server['port']}")
-            layout.label(text=f"cultlib_py_src: {server['cultlibPySrc']}")
+            layout.label(text=f"cultmesh_py loaded from: {server['cultmeshModule']}")
             if not server["loopback"]:
                 warning = layout.box()
                 warning.alert = True
@@ -332,6 +333,7 @@ class BROKKR_PT_status(bpy.types.Panel):
             if server["tokenRequired"]:
                 layout.label(text="Session token (send as sessionToken on every put):")
                 layout.label(text=adapter.session_token)
+                layout.operator("brokkr.copy_session_token", icon="COPYDOWN")
 
         row = layout.row(align=True)
         row.operator("brokkr.capture_snapshot", icon="FILE_REFRESH")
@@ -466,6 +468,21 @@ class BROKKR_OT_start_server(bpy.types.Operator):
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         self.report({"INFO"}, f"Brokkr Blender server: {status['endpoint']}")
+        return {"FINISHED"}
+
+
+class BROKKR_OT_copy_session_token(bpy.types.Operator):
+    bl_idname = "brokkr.copy_session_token"
+    bl_label = "Copy Session Token"
+    bl_description = "Copy the running server's session token to the clipboard"
+
+    def execute(self, context):
+        token = target().session_token
+        if not token:
+            self.report({"WARNING"}, "No session token: the server is stopped or the token is off.")
+            return {"CANCELLED"}
+        context.window_manager.clipboard = token
+        self.report({"INFO"}, "Brokkr session token copied.")
         return {"FINISHED"}
 
 
@@ -620,6 +637,7 @@ classes = (
     BROKKR_OT_drain_commands,
     BROKKR_OT_start_server,
     BROKKR_OT_stop_server,
+    BROKKR_OT_copy_session_token,
     BROKKR_OT_publish_object_sync,
     BROKKR_OT_publish_timeline_sync,
     BROKKR_OT_refresh_sync_receipt,

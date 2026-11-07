@@ -82,6 +82,10 @@ def guarded_server_class(base: type, guard: SessionGuard) -> type:
                     f"Document writes need the session token in the {TOKEN_FIELD} field.",
                     message_id=str(message.get("messageId") or ""),
                 )]
+            if TOKEN_FIELD in message:
+                # The store copies every envelope field but schemaVersion into the shard log it
+                # serves, so the token must not reach it.
+                message = {key: value for key, value in message.items() if key != TOKEN_FIELD}
             return super()._handle_connection_message(message, subscriptions, **kwargs)
 
     return GuardedServer
