@@ -4,12 +4,15 @@ Run: python3 -m unittest discover -s surfaces/blender/tests -v
 """
 from __future__ import annotations
 
+import json
 import os
+import struct
 import sys
 import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ADDON = Path(__file__).resolve().parents[1] / "brokkr_bridge"
 package = types.ModuleType("brokkr_bridge")
@@ -20,6 +23,13 @@ from brokkr_bridge import blender_target as bt  # noqa: E402
 from brokkr_bridge import scene_actions as sa  # noqa: E402
 
 NS = types.SimpleNamespace
+
+
+def glb_bytes(document=None):
+    document = document or {"asset": {"version": "2.0"}}
+    raw = json.dumps(document).encode()
+    raw += b" " * (-len(raw) % 4)
+    return struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(raw)) + struct.pack("<I4s", len(raw), b"JSON") + raw
 
 
 class Enum:
@@ -102,8 +112,8 @@ class ActionTests(unittest.TestCase):
         self.root = Path(self.tmp.name).resolve()
         (self.root / "in").mkdir()
         (self.root / "out").mkdir()
-        (self.root / "in" / "model.glb").write_bytes(b"glTF")
-        (self.root / "secret.glb").write_bytes(b"glTF")
+        (self.root / "in" / "model.glb").write_bytes(glb_bytes())
+        (self.root / "secret.glb").write_bytes(glb_bytes())
         self.bpy = FakeBpy()
         self.target = bt.BrokkrBlenderTarget(self.bpy)
         self.target.configure_action_dirs(str(self.root / "in"), str(self.root / "out"))
@@ -228,18 +238,158 @@ class ActionTests(unittest.TestCase):
         self.target.configure_action_dirs(str(self.root / "in"), "")
         self.assertEqual(self.run_action(action="renderStill", outputPath="a.png")["status"], "failed")
 
+    # importGltf: names
+    def test_import_refuses_drive_unc_extended_stream_and_device_names(self):
+        for name in ("C:foo.glb", "C:\\x\\model.glb", "\\\\host\\share\\model.glb", "\\\\?\\C:\\model.glb",
+                     "model.glb:stream", "/model.glb", "\\model.glb", "CON.glb", "sub/nul.glb", "model.glb.",
+                     "model.glb ", "a\x00.glb", "..\\secret.glb"):
+            self.assertEqual(self.run_action(action="importGltf", filepath=name)["status"], "failed", name)
+        self.assertEqual(self.bpy.imported, [])
+
+    def test_import_refuses_a_symlinked_folder_even_when_it_points_elsewhere_inside_the_root(self):
+        (self.root / "in" / "real").mkdir()
+        (self.root / "in" / "real" / "m.glb").write_bytes(glb_bytes())
+        try:
+            os.symlink(self.root / "in" / "real", self.root / "in" / "alias", target_is_directory=True)
+            os.symlink(self.root, self.root / "in" / "up", target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        for name in ("alias/m.glb", "up/secret.glb"):
+            self.assertEqual(self.run_action(action="importGltf", filepath=name)["status"], "failed", name)
+        self.assertEqual(self.run_action(action="importGltf", filepath="real/m.glb")["status"], "accepted")
+
+    # importGltf: references inside the glTF
+    def write_gltf(self, name, document, glb=False):
+        path = self.root / "in" / name
+        if glb:
+            path.write_bytes(glb_bytes(document))
+        else:
+            path.write_text(json.dumps(document))
+        return path
+
+    def test_gltf_with_references_inside_the_root_and_data_uris_is_imported(self):
+        (self.root / "in" / "tex").mkdir()
+        (self.root / "in" / "tex" / "a.png").write_bytes(b"png")
+        (self.root / "in" / "m.bin").write_bytes(b"bin")
+        for glb, name in ((False, "ok.gltf"), (True, "ok.glb")):
+            self.write_gltf(name, {"asset": {"version": "2.0"},
+                                   "buffers": [{"uri": "m.bin", "byteLength": 3},
+                                               {"uri": "data:application/octet-stream;base64,AAAA", "byteLength": 3}],
+                                   "images": [{"uri": "tex/a%2Epng"}]}, glb=glb)
+            self.assertEqual(self.run_action(action="importGltf", filepath=name)["status"], "accepted", name)
+        self.assertEqual(len(self.bpy.imported), 2)
+
+    def test_gltf_references_that_leave_the_root_or_name_a_scheme_are_refused(self):
+        bad = ["../secret.glb", "..\\secret.glb", "%2e%2e/secret.glb", "/etc/passwd", "\\\\host\\share\\x.bin",
+               "C:\\Windows\\x.bin", "C:x.bin", "file:///etc/passwd", "http://example.com/x.bin",
+               "x.bin:stream", "sub/../../secret.glb", "CON", "x.bin."]
+        for kind in ("buffers", "images"):
+            for uri in bad:
+                for glb in (False, True):
+                    name = f"bad{glb}.{'glb' if glb else 'gltf'}"
+                    self.write_gltf(name, {"asset": {"version": "2.0"}, kind: [{"uri": uri}]}, glb=glb)
+                    receipt = self.run_action(action="importGltf", filepath=name)
+                    self.assertEqual(receipt["status"], "failed", (kind, uri, glb))
+        self.assertEqual(self.bpy.imported, [])
+
+    def test_gltf_reference_through_a_symlink_that_escapes_is_refused(self):
+        try:
+            os.symlink(self.root / "secret.glb", self.root / "in" / "buf.bin")
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.write_gltf("link.gltf", {"asset": {"version": "2.0"}, "buffers": [{"uri": "buf.bin"}]})
+        self.assertEqual(self.run_action(action="importGltf", filepath="link.gltf")["status"], "failed")
+        self.assertEqual(self.bpy.imported, [])
+
+    def test_malformed_gltf_is_refused(self):
+        (self.root / "in" / "junk.gltf").write_text("{not json")
+        (self.root / "in" / "list.gltf").write_text("[]")
+        (self.root / "in" / "trunc.glb").write_bytes(glb_bytes()[:21])
+        (self.root / "in" / "notglb.glb").write_bytes(b"GLTF" + bytes(30))
+        (self.root / "in" / "uri.gltf").write_text(json.dumps({"buffers": [{"uri": 5}]}))
+        for name in ("junk.gltf", "list.gltf", "trunc.glb", "notglb.glb", "uri.gltf"):
+            self.assertEqual(self.run_action(action="importGltf", filepath=name)["status"], "failed", name)
+        self.assertEqual(self.bpy.imported, [])
+
+    def test_import_is_refused_when_the_file_changes_between_check_and_use(self):
+        target_file = self.root / "in" / "model.glb"
+        original = sa.gltf_references
+
+        def swap_after_check(path, root):
+            result = original(path, root)
+            target_file.write_bytes(glb_bytes({"asset": {"version": "2.0"}, "extras": "x" * 50}))
+            return result
+        with mock.patch.object(sa, "gltf_references", swap_after_check):
+            receipt = self.run_action(action="importGltf", filepath="model.glb")
+        self.assertEqual(receipt["status"], "failed")
+        self.assertIn("changed", receipt["message"])
+        self.assertEqual(self.bpy.imported, [])
+
+    # renderStill: existing names and links
+    def test_render_refuses_an_existing_file_symlink_dangling_symlink_or_hardlink(self):
+        out = self.root / "out"
+        (out / "taken.png").write_bytes(b"old")
+        cases = ["taken.png"]
+        try:
+            os.symlink(self.root / "secret.glb", out / "sym.png")
+            os.symlink(self.root / "nowhere.png", out / "dangling.png")
+            os.link(self.root / "secret.glb", out / "hard.png")
+            cases += ["sym.png", "dangling.png", "hard.png"]
+        except OSError:
+            pass
+        for name in cases:
+            self.assertEqual(self.run_action(action="renderStill", outputPath=name)["status"], "failed", name)
+        self.assertEqual(self.bpy.rendered, [])
+        self.assertEqual((out / "taken.png").read_bytes(), b"old")
+
+    def test_render_refuses_a_symlinked_output_folder(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        try:
+            os.symlink(outside, self.root / "out" / "dir", target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.assertEqual(self.run_action(action="renderStill", outputPath="dir/a.png")["status"], "failed")
+        self.assertEqual(self.bpy.rendered, [])
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_render_refuses_drive_unc_extended_stream_and_device_names(self):
+        for name in ("C:a.png", "C:\\a.png", "\\\\host\\share\\a.png", "\\\\?\\C:\\a.png", "a.png:stream",
+                     "/a.png", "NUL.png", "a.png.", "x/../a.png"):
+            self.assertEqual(self.run_action(action="renderStill", outputPath=name)["status"], "failed", name)
+        self.assertEqual(self.bpy.rendered, [])
+
+    def test_render_is_refused_when_a_link_appears_after_the_check(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        real_mkdir = Path.mkdir
+
+        def swap(self_path, *args, **kwargs):
+            real_mkdir(self_path, *args, **kwargs)
+            if self_path.name == "late":
+                self_path.rmdir()
+                os.symlink(outside, self_path, target_is_directory=True)
+        try:
+            with mock.patch.object(Path, "mkdir", swap):
+                receipt = self.run_action(action="renderStill", outputPath="late/a.png")
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.assertEqual(receipt["status"], "failed")
+        self.assertEqual(self.bpy.rendered, [])
+
     def test_capabilities_advertise_the_new_actions(self):
         for capability in ("asset.import.gltf", "camera.write", "light.write", "world.write", "render.still"):
             self.assertIn(capability, bt.CAPABILITIES)
 
 
 class PathTests(unittest.TestCase):
-    def test_resolve_inside_collapses_dotdot(self):
+    def test_resolve_inside_takes_plain_relative_paths_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            self.assertEqual(sa.resolve_inside(tmp, "a/../b.png", "output"), root / "b.png")
-            with self.assertRaises(sa.ActionRefused):
-                sa.resolve_inside(tmp, "a/../../b.png", "output")
+            self.assertEqual(sa.resolve_inside(tmp, "a/./b.png", "output"), root / "a" / "b.png")
+            for name in ("a/../b.png", "a/../../b.png", "..", "", "."):
+                with self.assertRaises(sa.ActionRefused, msg=name):
+                    sa.resolve_inside(tmp, name, "output")
 
 
 if __name__ == "__main__":

@@ -594,8 +594,19 @@ class BrokkrBlenderTarget:
         return self._receipt(command, "failed", "Target object cannot receive materials.", obj.name)
 
     def _import_gltf(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
-        path = sa.resolve_inside(self.import_dir, str(command.get("filepath") or ""), "import")
+        name = str(command.get("filepath") or "")
+        path = sa.resolve_inside(self.import_dir, name, "import")
         sa.require_gltf(path)
+        stamped = sa.fingerprint([path])  # before the parse, so a swap during it shows
+        references = sa.gltf_references(path, self.import_dir)
+        existing = [r for r in references if r.exists()]
+        checked = (stamped, sa.fingerprint(existing))
+        # Re-check immediately before use: the same path, the same files, the same bytes' stats.
+        # Blender then opens the files itself, so a swap in that last gap is not prevented
+        # (residual TOCTOU): the import directory must only be writable by trusted users.
+        if sa.resolve_inside(self.import_dir, name, "import") != path or \
+                (sa.fingerprint([path]), sa.fingerprint(existing)) != checked:
+            raise sa.ActionRefused("Import file changed while it was being checked.")
         before = set(self.bpy.data.objects.keys())
         self.bpy.ops.import_scene.gltf(filepath=str(path))
         added = sorted(set(self.bpy.data.objects.keys()) - before)
@@ -679,7 +690,8 @@ class BrokkrBlenderTarget:
     def _render_still(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         scene = context.scene
         render = scene.render
-        path = sa.resolve_inside(self.output_dir, str(command.get("outputPath") or ""), "output")
+        name = str(command.get("outputPath") or "")
+        path = sa.resolve_inside(self.output_dir, name, "output", new_file=True)
         file_format = sa.still_format(path)
         # The engine enum is dynamic (Cycles and add-on engines register at runtime), and RNA's
         # enum_items on a dynamic enum lists only its static defaults, so the running Blender is
@@ -700,6 +712,12 @@ class BrokkrBlenderTarget:
         saved = (render.engine, render.resolution_x, render.resolution_y, render.filepath,
                  render.image_settings.file_format, scene.camera)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Re-check after the folders exist and immediately before use: no link was swapped in,
+        # and the name is still free. Blender opens the file itself afterwards, so a swap in
+        # that last gap is not prevented (residual TOCTOU): the output directory must only
+        # be writable by trusted users.
+        if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
+            raise sa.ActionRefused("Output path changed while it was being checked.")
         try:
             if engine is not None:
                 try:
