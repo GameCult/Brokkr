@@ -128,3 +128,8 @@ gets a `failed` receipt whose message names the rule):
   `resolutionY` (whole numbers, 1 to 16384), `cameraName`. Engine, resolution,
   camera, file path and format are restored after the render. The render blocks
   Blender's UI until it finishes.
+
+The scene actions were run against Blender 5.2.3 LTS headless with
+`surfaces/blender/tests/live/headless_smoke.py` (usage in its docstring). One real
+failure it found: Blender's `engine` enum is dynamic, so `bl_rna` lists only
+`BLENDER_EEVEE`; `renderStill` now asks Blender by assignment instead.

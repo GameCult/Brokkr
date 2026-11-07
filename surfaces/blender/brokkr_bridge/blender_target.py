@@ -681,8 +681,13 @@ class BrokkrBlenderTarget:
         render = scene.render
         path = sa.resolve_inside(self.output_dir, str(command.get("outputPath") or ""), "output")
         file_format = sa.still_format(path)
-        engines = tuple(item.identifier for item in render.bl_rna.properties["engine"].enum_items)
-        engine = sa.choice(command, "engine", engines)
+        # The engine enum is dynamic (Cycles and add-on engines register at runtime), and RNA's
+        # enum_items on a dynamic enum lists only its static defaults, so the running Blender is
+        # asked by assignment below and a TypeError there is the refusal.
+        engine = command.get("engine")
+        if engine is not None and (not isinstance(engine, str) or not engine.strip()):
+            raise sa.ActionRefused("engine must be a render engine identifier.")
+        engine = engine.strip().upper() if engine else None
         width = sa.integer(command, "resolutionX", 1, sa.MAX_RESOLUTION)
         height = sa.integer(command, "resolutionY", 1, sa.MAX_RESOLUTION)
         camera_name = str(command.get("cameraName") or "")
@@ -697,7 +702,10 @@ class BrokkrBlenderTarget:
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             if engine is not None:
-                render.engine = engine
+                try:
+                    render.engine = engine
+                except TypeError:
+                    raise sa.ActionRefused(f"engine {engine} is not available in this Blender.") from None
             if width is not None:
                 render.resolution_x = width
             if height is not None:

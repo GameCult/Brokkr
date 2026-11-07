@@ -27,11 +27,32 @@ class Enum:
         self.enum_items = [NS(identifier=n) for n in names]
 
 
+class FakeRender:
+    """Assigning an engine Blender does not have raises TypeError, as RNA enums do. The enum's
+    bl_rna lists only the static default, as a real dynamic enum does (Blender 5.2.3 reports
+    only BLENDER_EEVEE there while Cycles is installed)."""
+
+    ENGINES = ("BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH")
+
+    def __init__(self):
+        self._engine = "BLENDER_EEVEE"
+        self.resolution_x, self.resolution_y, self.filepath = 1920, 1080, "//old"
+        self.image_settings = NS(file_format="PNG")
+        self.bl_rna = NS(properties={"engine": Enum("BLENDER_EEVEE")})
+
+    @property
+    def engine(self):
+        return self._engine
+
+    @engine.setter
+    def engine(self, value):
+        if value not in self.ENGINES:
+            raise TypeError(f"enum {value!r} not found")
+        self._engine = value
+
+
 def fake_render():
-    render = NS(engine="BLENDER_EEVEE", resolution_x=1920, resolution_y=1080, filepath="//old",
-                image_settings=NS(file_format="PNG"))
-    render.bl_rna = NS(properties={"engine": Enum("BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH")})
-    return render
+    return FakeRender()
 
 
 class Objects(dict):
