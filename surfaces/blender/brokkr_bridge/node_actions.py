@@ -116,7 +116,7 @@ def check_interface(items: Any) -> list[dict[str, str]]:
 class NodeActions:
     """Applies the node-graph actions to a bpy module. Stateless: every lookup goes to bpy.data."""
 
-    ACTIONS = ("createNodeGroup", "addNode", "linkSockets", "addModifier", "setModifierInput")
+    ACTIONS = ("createNodeGroup", "addNode", "removeNode", "linkSockets", "unlinkSockets", "addModifier", "removeModifier", "setModifierInput")
 
     def __init__(self, bpy_module: Any):
         self.bpy = bpy_module
@@ -228,12 +228,38 @@ class NodeActions:
         except (TypeError, ValueError) as error:
             raise ActionRefused(f"property {name!r} cannot be {value!r}: {error}") from None
 
+    def _removeNode(self, command: dict[str, Any]) -> tuple[str, str]:
+        tree = self._tree(tree_key(command))
+        node_id = text(command, "id", ID_PATTERN, "id")
+        if node_id in ("gin", "gout"):
+            raise ActionRefused(f"{node_id!r} is the group's own input/output node and stays.")
+        node = next((n for n in tree.nodes if n.get("brokkr_id") == node_id), None)
+        if node is None:
+            return f"Node {node_id!r} was already absent.", node_id
+        tree.nodes.remove(node)  # Blender drops the node's links with it
+        return "Node removed.", node_id
+
+    def _unlinkSockets(self, command: dict[str, Any]) -> tuple[str, str]:
+        tree = self._tree(tree_key(command))
+        target = self._node(tree, text(command, "toNode", ID_PATTERN, "toNode"))
+        into = self._socket(target.inputs, str(command.get("toSocket", "")), "toSocket")
+        source = out = None
+        if command.get("fromNode") or command.get("fromSocket"):
+            source = self._node(tree, text(command, "fromNode", ID_PATTERN, "fromNode"))
+            out = self._socket(source.outputs, str(command.get("fromSocket", "")), "fromSocket")
+        doomed = [l for l in tree.links if l.to_socket == into and (out is None or l.from_socket == out)]
+        for link in doomed:
+            tree.links.remove(link)
+        return f"Removed {len(doomed)} link(s).", tree.name
+
     def _linkSockets(self, command: dict[str, Any]) -> tuple[str, str]:
         tree = self._tree(tree_key(command))
         source = self._node(tree, text(command, "fromNode", ID_PATTERN, "fromNode"))
         target = self._node(tree, text(command, "toNode", ID_PATTERN, "toNode"))
         out = self._socket(source.outputs, str(command.get("fromSocket", "")), "fromSocket")
         into = self._socket(target.inputs, str(command.get("toSocket", "")), "toSocket")
+        if reaches(tree, target, source):  # includes a self link
+            raise ActionRefused(f"Link {source.get('brokkr_id')} -> {target.get('brokkr_id')} would make a cycle.")
         displaced = [l.from_socket for l in tree.links if l.to_socket == into] if not getattr(into, "is_multi_input", False) else []
         link = tree.links.new(out, into)  # replaces whatever single link the input had
         if not link.is_valid:
@@ -270,6 +296,18 @@ class NodeActions:
         obj.update_tag()
         return "Geometry Nodes modifier set.", obj.name
 
+    def _removeModifier(self, command: dict[str, Any]) -> tuple[str, str]:
+        obj = self._object(command)
+        name = str(command.get("modifierName") or "Brokkr GeoNodes")
+        modifier = obj.modifiers.get(name)
+        if modifier is None:
+            return f"Modifier {name!r} was already absent.", obj.name
+        if modifier.type != "NODES":
+            raise ActionRefused(f"{name!r} is not a Geometry Nodes modifier; only those are removed here.")
+        obj.modifiers.remove(modifier)
+        obj.update_tag()
+        return "Modifier removed.", obj.name
+
     def _setModifierInput(self, command: dict[str, Any]) -> tuple[str, str]:
         obj = self._object(command)
         modifier = obj.modifiers.get(str(command.get("modifierName") or "Brokkr GeoNodes"))
@@ -281,6 +319,21 @@ class NodeActions:
         getattr(modifier.properties.inputs, item.identifier).value = value
         obj.update_tag()  # without it a headless re-evaluation returned the previous result
         return f"Modifier input {item.name} set.", obj.name
+
+
+def reaches(tree: Any, start: Any, goal: Any) -> bool:
+    """True if following links forward from `start` arrives at `goal` (so a link goal -> start closes a cycle)."""
+    seen: set[int] = set()
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        if node == goal:
+            return True
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        stack.extend(l.to_node for l in tree.links if l.from_node == node)
+    return False
 
 
 def modifier_input(tree: Any, key: str) -> Any:

@@ -185,6 +185,56 @@ ok(t3, action="createObject", objectType="MESH", name="InfHost"); ok(t3, action=
 ev = evaluated(t3, "InfHost")
 check("non-finite evaluated positions are flagged and not published", ev["nonFinite"] and ev["vertexLocations"] == [] and json.dumps(ev, allow_nan=False), ev)
 
+
+# ---- removal, unlinking, cycles (cut 2)
+import time
+t4 = fresh()
+graph(t4, "R", GEO_OUT + [{"inOut": "INPUT", "name": "Count", "type": "Int", "default": 4}],
+      [dict(id="circle", blIdname="GeometryNodeMeshCircle", inputs={"Radius": 1.0}), dict(id="cube", blIdname="GeometryNodeMeshCube"), dict(id="iop", blIdname="GeometryNodeInstanceOnPoints"),
+       dict(id="m1", blIdname="ShaderNodeMath"), dict(id="m2", blIdname="ShaderNodeMath")],
+      [("gin", "Count", "circle", "Vertices"), ("circle", "Mesh", "iop", "Points"), ("cube", "Mesh", "iop", "Instance"), ("iop", "Instances", "gout", "Geometry"), ("m1", "Value", "m2", "Value")])
+host(t4, "RHost", "R")
+check("graph evaluates before removal", evaluated(t4, "RHost")["instanceCount"] == 4)
+for src, dst in (("m2", "m1"), ("m1", "m1")):
+    r = act(t4, action="linkSockets", treeKey="R", fromNode=src, fromSocket="Value", toNode=dst, toSocket="Value_001"); check("cycle %s->%s refused" % (src, dst), r["status"] == "failed" and "cycle" in r["message"], r["message"])
+check("refused cycle left the link set alone", len(bpy.data.node_groups["R"].links) == 5)
+r = ok(t4, action="unlinkSockets", treeKey="R", fromNode="m1", fromSocket="Value", toNode="m2", toSocket="Value")
+check("unlinked exactly one link", len(bpy.data.node_groups["R"].links) == 4, r["message"])
+r = ok(t4, action="unlinkSockets", treeKey="R", toNode="m2", toSocket="Value"); check("unlink of nothing is accepted", "Removed 0" in r["message"], r["message"])
+ok(t4, action="unlinkSockets", treeKey="R", toNode="iop", toSocket="Instance")
+check("unlinking the instance changes the result", evaluated(t4, "RHost")["instanceCount"] == 0, evaluated(t4, "RHost"))
+ok(t4, action="linkSockets", treeKey="R", fromNode="cube", fromSocket="Mesh", toNode="iop", toSocket="Instance")
+check("relinked", evaluated(t4, "RHost")["instanceCount"] == 4)
+links_before = len(bpy.data.node_groups["R"].links)
+ok(t4, action="removeNode", treeKey="R", id="cube")
+check("removeNode drops the node and its links", not any(n.get("brokkr_id") == "cube" for n in bpy.data.node_groups["R"].nodes) and len(bpy.data.node_groups["R"].links) == links_before - 1)
+r = act(t4, action="removeNode", treeKey="R", id="gout"); check("group output node stays", r["status"] == "failed", r["message"])
+check("removeNode of an absent id is accepted", act(t4, action="removeNode", treeKey="R", id="cube")["status"] == "accepted")
+ok(t4, action="removeModifier", objectName="RHost", modifierName="GN")
+check("removeModifier removes it; evaluated block gone", len(bpy.data.objects["RHost"].modifiers) == 0 and evaluated(t4, "RHost") is None)
+bpy.data.objects["RHost"].modifiers.new("Sub", "SUBSURF")
+r = act(t4, action="removeModifier", objectName="RHost", modifierName="Sub"); check("non-Geometry-Nodes modifier is not removed", r["status"] == "failed" and len(bpy.data.objects["RHost"].modifiers) == 1, r["message"])
+
+# ---- cost: a heavy graph must not stall capture
+def heavy(n, instanced):
+    tt = fresh()
+    nodes = [dict(id="grid", blIdname="GeometryNodeMeshGrid", inputs={"Vertices X": n, "Vertices Y": n})]
+    links = []
+    if instanced:
+        nodes += [dict(id="cube", blIdname="GeometryNodeMeshCube"), dict(id="iop", blIdname="GeometryNodeInstanceOnPoints")]
+        links = [("grid", "Mesh", "iop", "Points"), ("cube", "Mesh", "iop", "Instance"), ("iop", "Instances", "gout", "Geometry")]
+    else:
+        links = [("grid", "Mesh", "gout", "Geometry")]
+    graph(tt, "Heavy", GEO_OUT, nodes, links); host(tt, "HeavyHost", "Heavy")
+    t0 = time.time(); snap = tt.capture_snapshot(bpy.context); dt = time.time() - t0
+    return dt, [o for o in snap["objects"] if o["name"] == "HeavyHost"][0]["evaluated"]
+dt, ev = heavy(2000, True)
+R["capture_2000_grid_instanced_seconds"] = round(dt, 3)
+check("2000x2000 instanced grid: capture is bounded", dt < 3.0 and ev["instancesComplete"] is False and ev["instanceCount"] <= 100000, (round(dt, 2), ev["instanceCount"], ev["instancesComplete"]))
+dt, ev = heavy(2000, False)
+R["capture_2000_grid_mesh_seconds"] = round(dt, 3)
+check("2000x2000 mesh grid: counts only, bounded", dt < 3.0 and ev["vertexCount"] == 4000000 and ev["positionsSkipped"], (round(dt, 2), ev["vertexCount"]))
+
 json.dump(R, open(out, "w"), indent=1, default=str)
 bad = [c for c in R["checks"] if not c["ok"]]
 print("DONE", len(R["checks"]), "checks,", len(bad), "failed")

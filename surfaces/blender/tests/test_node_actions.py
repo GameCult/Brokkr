@@ -40,6 +40,8 @@ class Node(dict):
         self.bl_rna = NS(properties=self.PROPS)
         self.inputs = [Sock("A", "A"), Sock("Size", "Size", "VECTOR", (1.0, 1.0, 1.0)), Sock("B", "Dup"), Sock("B_VEC", "Dup")]
         self.outputs = [Sock("Out", "Out")]
+        for socket in self.inputs + self.outputs:
+            socket.node = self
 
     def __setattr__(self, key, value):
         if key == "operation" and value not in ("ADD", "MULTIPLY"):
@@ -67,7 +69,7 @@ class Links(list):
     def new(self, a, b):
         for old in [l for l in self if l.to_socket is b]:  # a single-link input loses its old link, as in Blender
             list.remove(self, old)
-        link = NS(from_socket=a, to_socket=b, is_valid=self.valid(a, b) if callable(self.valid) else self.valid)
+        link = NS(from_socket=a, to_socket=b, from_node=a.node, to_node=b.node, is_valid=self.valid(a, b) if callable(self.valid) else self.valid)
         self.append(link)
         return link
 
@@ -115,6 +117,9 @@ class Modifiers(list):
 
     def get(self, name):
         return next((m for m in self if m.name == name), None)
+
+    def remove(self, modifier):
+        list.remove(self, modifier)
 
     def new(self, name, kind):
         if self.refuses:
@@ -250,8 +255,9 @@ class NodeActionTests(unittest.TestCase):
     def test_unavailable_socket_is_not_addressable_by_name(self):
         tree = self.group()
         self.accepted(action="addNode", treeKey="G", id="a", blIdname="ShaderNodeMath")
+        self.accepted(action="addNode", treeKey="G", id="b", blIdname="ShaderNodeMath")
         tree.nodes[-1].inputs[3].enabled = False
-        self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="a", toSocket="Dup")
+        self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="b", toSocket="Dup")
 
     def test_invalid_link_is_refused_and_removed(self):
         tree = self.group()
@@ -306,6 +312,62 @@ class NodeActionTests(unittest.TestCase):
         self.refused(action="setModifierInput", objectName="Host", modifierName="GN", socket="Dup", value=1)
         self.accepted(action="setModifierInput", objectName="Host", modifierName="GN", socket="Socket_1", value=1.5)
         self.assertEqual(host.modifiers[0].properties.inputs.Socket_1.value, 1.5)
+
+    # removal, unlinking, cycles
+    def chain(self):
+        tree = self.group()
+        for node_id in ("a", "b", "c"):
+            self.accepted(action="addNode", treeKey="G", id=node_id, blIdname="ShaderNodeMath")
+        return tree
+
+    def test_cycles_and_self_links_are_refused_and_change_nothing(self):
+        tree = self.chain()
+        self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="b", toSocket="A")
+        self.accepted(action="linkSockets", treeKey="G", fromNode="b", fromSocket="Out", toNode="c", toSocket="A")
+        before = list(tree.links)
+        for src, dst in (("c", "a"), ("b", "a"), ("a", "a"), ("c", "b")):
+            receipt = self.refused(action="linkSockets", treeKey="G", fromNode=src, fromSocket="Out", toNode=dst, toSocket="Size")
+            self.assertIn("cycle", receipt["message"])
+        self.assertEqual(list(tree.links), before)
+        self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="c", toSocket="Size")  # a forward skip is no cycle
+
+    def test_remove_node(self):
+        tree = self.chain()
+        self.accepted(action="removeNode", treeKey="G", id="b")
+        self.assertEqual([n.get("brokkr_id") for n in tree.nodes], ["gin", "gout", "a", "c"])
+        again = self.accepted(action="removeNode", treeKey="G", id="b")
+        self.assertIn("already absent", again["message"])
+        for keep in ("gin", "gout"):
+            self.refused(action="removeNode", treeKey="G", id=keep)
+        self.refused(action="removeNode", treeKey="Nope", id="a")
+        self.refused(action="removeNode", treeKey="G", id="a b")
+
+    def test_unlink_removes_only_the_matching_links(self):
+        tree = self.chain()
+        self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="c", toSocket="A")
+        self.accepted(action="linkSockets", treeKey="G", fromNode="b", fromSocket="Out", toNode="c", toSocket="Size")
+        self.refused(action="unlinkSockets", treeKey="G", fromNode="zzz", fromSocket="Out", toNode="c", toSocket="A")
+        self.assertIn("Removed 0", self.accepted(action="unlinkSockets", treeKey="G", fromNode="b", fromSocket="Out", toNode="c", toSocket="A")["message"])
+        self.assertEqual(len(tree.links), 2)
+        self.assertIn("Removed 1", self.accepted(action="unlinkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="c", toSocket="A")["message"])
+        self.assertEqual(len(tree.links), 1)
+        self.accepted(action="unlinkSockets", treeKey="G", toNode="c", toSocket="Size")
+        self.assertEqual(len(tree.links), 0)
+        self.refused(action="unlinkSockets", treeKey="G", fromNode="a", toNode="c", toSocket="A")  # a source node needs its socket
+
+    def test_remove_modifier_takes_only_geometry_nodes_modifiers(self):
+        self.group()
+        host = self.bpy.data.objects["Host"]
+        self.accepted(action="addModifier", objectName="Host", modifierName="GN", treeKey="G")
+        host.modifiers.new("Sub", "SUBSURF")
+        tags = host.tagged
+        self.refused(action="removeModifier", objectName="Host", modifierName="Sub")
+        self.assertEqual([m.name for m in host.modifiers], ["GN", "Sub"])
+        self.accepted(action="removeModifier", objectName="Host", modifierName="GN")
+        self.assertEqual([m.name for m in host.modifiers], ["Sub"])
+        self.assertEqual(host.tagged, tags + 1)
+        self.assertIn("already absent", self.accepted(action="removeModifier", objectName="Host", modifierName="GN")["message"])
+        self.refused(action="removeModifier", objectName="Nope", modifierName="GN")
 
     # setObjectCustomProperty on a Geometry Nodes host
     def test_custom_property_naming_a_modifier_input_identifier_is_refused(self):
@@ -419,9 +481,26 @@ class NodeActionTests(unittest.TestCase):
             self.target._evaluated_snapshot(host, scan)
         self.assertEqual(len(calls), 1)
 
+    def test_instance_scan_stops_at_the_limit_and_says_so(self):
+        host = self.bpy.data.objects["Host"]
+        visited = []
+
+        def many():
+            for i in range(50):
+                visited.append(i)
+                yield self.instance(host, (float(i), 0.0, 0.0))
+
+        host = self.snapshot_fixture([(0.0, 0.0, 0.0)], many())
+        with unittest.mock.patch.object(bt, "EVALUATED_INSTANCE_SCAN_LIMIT", 10):
+            data = self.evaluated(host)
+        self.assertEqual((data["instanceCount"], data["instancesComplete"]), (10, False))
+        self.assertLessEqual(len(visited), 11)  # the generator is abandoned, not drained
+        host = self.snapshot_fixture([(0.0, 0.0, 0.0)], [self.instance(host, (1.0, 0.0, 0.0))])
+        self.assertTrue(self.evaluated(host)["instancesComplete"])
+
     def test_object_without_modifiers_has_no_evaluated_block(self):
         self.assertIsNone(self.target._evaluated_snapshot(self.bpy.data.objects["Host"], None))
-        self.assertIsNone(self.target._evaluated_snapshot(self.bpy.data.objects["Host"], (None, {})))
+        self.assertIsNone(self.target._evaluated_snapshot(self.bpy.data.objects["Host"], (None, {}, True)))
 
 
 if __name__ == "__main__":

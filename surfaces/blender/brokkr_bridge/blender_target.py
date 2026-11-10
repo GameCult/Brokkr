@@ -36,6 +36,7 @@ SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
 
 EVALUATED_POSITION_CAP = 256
 EVALUATED_VERTEX_LIMIT = 1_000_000
+EVALUATED_INSTANCE_SCAN_LIMIT = 100_000  # depsgraph items visited per capture; iterating one in Python costs ~5 us
 
 CAPABILITIES = (
     "cultcache.mirror.publish",
@@ -817,7 +818,13 @@ class BrokkrBlenderTarget:
         depsgraph = self.bpy.context.evaluated_depsgraph_get()
         depsgraph.update()
         found: dict[str, dict[str, Any]] = {}
+        visited = 0
+        complete = True
         for item in depsgraph.object_instances:
+            visited += 1
+            if visited > EVALUATED_INSTANCE_SCAN_LIMIT:
+                complete = False
+                break
             if not item.is_instance or item.parent is None:
                 continue
             entry = found.setdefault(item.parent.original.name, {"count": 0, "first": [], "min": None, "max": None})
@@ -827,7 +834,7 @@ class BrokkrBlenderTarget:
                 entry["first"].append([round(c, 5) for c in point])
             entry["min"] = list(point) if entry["min"] is None else [min(a, b) for a, b in zip(entry["min"], point)]
             entry["max"] = list(point) if entry["max"] is None else [max(a, b) for a, b in zip(entry["max"], point)]
-        return depsgraph, found
+        return depsgraph, found, complete
 
     def _evaluated_snapshot(self, obj: Any, scan: Any) -> dict[str, Any] | None:
         """What the modifier stack produced, for mesh objects that have one. Vertex positions and their bounds
@@ -836,7 +843,7 @@ class BrokkrBlenderTarget:
         vertices only the counts are read, and any non-finite coordinate drops the positions and sets nonFinite."""
         if obj.type != "MESH" or not len(obj.modifiers) or scan is None:
             return None
-        depsgraph, found = scan
+        depsgraph, found, complete = scan
         evaluated = obj.evaluated_get(depsgraph)
         mesh = evaluated.to_mesh()
         try:
@@ -853,6 +860,7 @@ class BrokkrBlenderTarget:
         points = [coords[i:i + 3] for i in range(0, 3 * count, 3)] if coords is not None else []
         result.update({
             "instanceCount": entry["count"],
+            "instancesComplete": complete,
             "positionsSkipped": count > EVALUATED_VERTEX_LIMIT,
             "nonFinite": not finite,
             "vertexBoundsMin": [min(p[a] for p in points) for a in range(3)] if points and finite else [],

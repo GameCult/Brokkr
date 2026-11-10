@@ -220,6 +220,9 @@ All Blender writes use `brokkr.blender.command_intent.v0` and receive
 - `setLight`
 - `setWorld`
 - `renderStill`
+- `createNodeGroup`, `addNode`, `removeNode`, `linkSockets`, `unlinkSockets`, `addModifier`,
+  `removeModifier`, `setModifierInput` (Geometry Nodes graphs; fields in
+  `surfaces/blender/docs/node-actions.md`)
 
 Blender owns the mutation. Brokkr advertises the command surface; Verse clients
 write typed command intents; Blender executes recognized intents and publishes
