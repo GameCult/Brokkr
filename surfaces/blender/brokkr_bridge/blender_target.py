@@ -52,6 +52,7 @@ CAPABILITIES = (
     "selection.read",
     "selection.write",
     "asset.import.gltf",
+    "asset.export.gltf",
     "camera.write",
     "light.write",
     "world.write",
@@ -499,6 +500,8 @@ class BrokkrBlenderTarget:
                 return self._assign_material(context, command)
             if action == "importGltf":
                 return self._import_gltf(context, command)
+            if action == "exportGltf":
+                return self._export_gltf(context, command)
             if action == "setCamera":
                 return self._set_camera(context, command)
             if action == "setLight":
@@ -635,6 +638,56 @@ class BrokkrBlenderTarget:
         self.bpy.ops.import_scene.gltf(filepath=str(path))
         added = sorted(set(self.bpy.data.objects.keys()) - before)
         return self._receipt(command, "accepted", f"Imported {len(added)} object(s) from {path.name}.", added[0] if added else "")
+
+    def _export_gltf(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        """Write the scene (or the named objects) as .glb or .gltf under the output directory."""
+        name = command.get("filepath")
+        if not isinstance(name, str):
+            raise sa.ActionRefused("filepath must be a string.")
+        path = sa.resolve_inside(self.output_dir, name, "output", new_file=True)
+        suffix = path.suffix.lower()
+        if suffix not in sa.GLTF_EXTENSIONS:
+            raise sa.ActionRefused(f"Export path must end in {' or '.join(sa.GLTF_EXTENSIONS)}.")
+        options = {}
+        for field, key in (("extras", "export_extras"), ("yUp", "export_yup"), ("applyModifiers", "export_apply")):
+            value = command.get(field, True)
+            if not isinstance(value, bool):
+                raise sa.ActionRefused(f"{field} must be true or false.")
+            options[key] = value
+        names = command.get("selection")
+        chosen = []
+        if names is not None:
+            if not isinstance(names, list) or not names or not all(isinstance(n, str) and n for n in names):
+                raise sa.ActionRefused("selection must be a non-empty list of object names.")
+            missing = [n for n in names if n not in self.bpy.data.objects]
+            if missing:
+                raise sa.ActionRefused(f"Selection object was not found: {missing[0]}")
+            chosen = [self.bpy.data.objects[n] for n in dict.fromkeys(names)]
+        binary = path.with_suffix(".bin")
+        if suffix == ".gltf" and os.path.lexists(binary):
+            raise sa.ActionRefused("output path already exists; output actions never overwrite: " + binary.name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Re-check after the folders exist and just before use (residual TOCTOU as in renderStill).
+        if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
+            raise sa.ActionRefused("Output path changed while it was being checked.")
+        objects = list(self.bpy.data.objects.values())
+        saved = [(obj, obj.select_get()) for obj in objects]
+        try:
+            if chosen:
+                for obj in objects:
+                    obj.select_set(obj in chosen)
+            result = self.bpy.ops.export_scene.gltf(
+                filepath=str(path), export_format="GLB" if suffix == ".glb" else "GLTF_SEPARATE",
+                use_selection=bool(chosen), **options)
+        finally:
+            for obj, state in saved:
+                if obj.name in self.bpy.data.objects:
+                    obj.select_set(state)
+        if "FINISHED" not in result:
+            raise sa.ActionRefused(f"glTF export did not finish: {sorted(result)}")
+        if not path.is_file():
+            raise sa.ActionRefused("glTF export wrote no file.")
+        return self._receipt(command, "accepted", f"Exported glTF to {path} ({path.stat().st_size} bytes).", "")
 
     def _resolve_typed(self, command: dict[str, Any], object_type: str) -> Any:
         obj = self._resolve_object(command)

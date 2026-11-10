@@ -108,6 +108,7 @@ Admitted command actions:
 - `selectObject`
 - `assignMaterial`
 - `importGltf`
+- `exportGltf`
 - `setCamera`
 - `setLight`
 - `setWorld`
@@ -119,6 +120,13 @@ gets a `failed` receipt whose message names the rule):
 - `importGltf`: `filepath`, `.gltf` or `.glb`, relative to the add-on preference
   `Import Directory` (absolute paths, `..` and symlinks that resolve outside it are
   refused). Empty `Import Directory` disables the action. Needs Blender's glTF add-on.
+- `exportGltf`: `filepath`, `.glb` (binary) or `.gltf` (separate `.bin`), relative to the
+  add-on preference `Render Output Directory` (the renderStill rules: no `..`, no links, and an
+  existing name, or an existing `.bin` beside a `.gltf`, is refused; there is no overwrite).
+  Optional `extras` (custom properties become node `extras`), `yUp`, `applyModifiers`
+  (each true by default, must be a boolean) and `selection` (a non-empty list of object
+  names; any name not found refuses the export; the selection is restored afterwards).
+  The receipt message carries the written path and byte size. Needs Blender's glTF add-on.
 - `setCamera`: `targetObjectName` (a camera object); optional `lens` (mm),
   `cameraType` (`PERSP`, `ORTHO`, `PANO`), `panoramaType` (for example
   `EQUIRECTANGULAR`; read from the camera, or from `camera.cycles` before Blender 4.2),

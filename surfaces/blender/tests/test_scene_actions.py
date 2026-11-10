@@ -86,7 +86,15 @@ class FakeBpy:
             worlds=NS(get=lambda name: None, new=self.new_world),
         )
         self.path = NS(abspath=lambda p: p)
-        self.ops = NS(import_scene=NS(gltf=self.import_gltf), render=NS(render=self.render_still))
+        self.exported = []
+        self.export_result = {"FINISHED"}
+        self.export_writes = True
+        for o in self.data.objects.values():
+            o.selected = o is self.mesh
+            o.select_get = (lambda o=o: o.selected)
+            o.select_set = (lambda state, o=o: setattr(o, "selected", state))
+        self.ops = NS(import_scene=NS(gltf=self.import_gltf), render=NS(render=self.render_still),
+                      export_scene=NS(gltf=self.export_gltf))
 
     def new_world(self, name):
         background = NS(inputs={"Color": NS(default_value=None), "Strength": NS(default_value=None)})
@@ -98,6 +106,13 @@ class FakeBpy:
     def import_gltf(self, filepath):
         self.imported.append(filepath)
         self.data.objects["Imported"] = NS(name="Imported", type="MESH", data=None)
+
+    def export_gltf(self, **kwargs):
+        kwargs["selected_at_call"] = sorted(o.name for o in self.data.objects.values() if o.selected)
+        self.exported.append(kwargs)
+        if self.export_writes:
+            Path(kwargs["filepath"]).write_bytes(b"x" * 10)
+        return self.export_result
 
     def render_still(self, write_still):
         r = self.scene.render
@@ -205,6 +220,93 @@ class ActionTests(unittest.TestCase):
     def test_set_world_refuses_bad_colour_before_creating_a_world(self):
         self.assertEqual(self.run_action(action="setWorld", color=[9, 0, 0])["status"], "failed")
         self.assertIsNone(self.bpy.scene.world)
+
+    # exportGltf
+    def test_export_glb_defaults(self):
+        receipt = self.run_action(action="exportGltf", filepath="ship/a.glb")
+        self.assertEqual(receipt["status"], "accepted", receipt)
+        path = str(self.root / "out" / "ship" / "a.glb")
+        self.assertIn(path, receipt["message"])
+        self.assertIn("10 bytes", receipt["message"])
+        call = self.bpy.exported[0]
+        self.assertEqual({k: v for k, v in call.items() if k != "selected_at_call"},
+                         {"filepath": path, "export_format": "GLB", "export_extras": True,
+                          "export_yup": True, "export_apply": True, "use_selection": False})
+
+    def test_export_gltf_suffix_is_separate_and_options_pass_through(self):
+        receipt = self.run_action(action="exportGltf", filepath="a.GLTF", extras=False, yUp=False,
+                                  applyModifiers=False)
+        self.assertEqual(receipt["status"], "accepted", receipt)
+        call = self.bpy.exported[0]
+        self.assertEqual((call["export_format"], call["export_extras"], call["export_yup"], call["export_apply"]),
+                         ("GLTF_SEPARATE", False, False, False))
+
+    def test_export_selection_selects_exactly_those_then_restores(self):
+        receipt = self.run_action(action="exportGltf", filepath="a.glb", selection=["Cam", "Lamp"])
+        self.assertEqual(receipt["status"], "accepted", receipt)
+        call = self.bpy.exported[0]
+        self.assertTrue(call["use_selection"])
+        self.assertEqual(call["selected_at_call"], ["Cam", "Lamp"])
+        self.assertEqual([o.name for o in self.bpy.data.objects.values() if o.selected], ["Cube"])
+
+    def test_export_selection_restored_when_the_exporter_raises(self):
+        def boom(**kw):
+            raise RuntimeError("exporter blew up")
+        self.bpy.ops.export_scene.gltf = boom
+        receipt = self.run_action(action="exportGltf", filepath="a.glb", selection=["Cam"])
+        self.assertEqual(receipt["status"], "failed")
+        self.assertIn("exporter blew up", receipt["message"])
+        self.assertEqual([o.name for o in self.bpy.data.objects.values() if o.selected], ["Cube"])
+
+    def test_export_refusals_never_reach_bpy_or_disk(self):
+        (self.root / "out" / "taken.glb").write_bytes(b"old")
+        cases = [
+            {"filepath": "a.obj"}, {"filepath": "a"}, {"filepath": ""}, {"filepath": 5},
+            {"filepath": "../a.glb"}, {"filepath": str(self.root / "a.glb")},
+            {"filepath": "taken.glb"},
+            {"filepath": "a.glb", "selection": ["Nope"]},
+            {"filepath": "a.glb", "selection": ["Cube", "Nope"]},
+            {"filepath": "a.glb", "selection": []},
+            {"filepath": "a.glb", "selection": "Cube"},
+            {"filepath": "a.glb", "selection": [3]},
+            {"filepath": "a.glb", "extras": "yes"},
+            {"filepath": "a.glb", "yUp": 1},
+            {"filepath": "a.glb", "applyModifiers": None},
+        ]
+        for case in cases:
+            self.assertEqual(self.run_action(action="exportGltf", **case)["status"], "failed", case)
+        self.assertEqual(self.bpy.exported, [])
+        self.assertEqual((self.root / "out" / "taken.glb").read_bytes(), b"old")
+        self.assertEqual(sorted(p.name for p in (self.root / "out").iterdir()), ["taken.glb"])
+        self.assertIn("already exists", self.run_action(action="exportGltf", filepath="taken.glb")["message"])
+
+    def test_export_gltf_refuses_an_existing_bin_sibling(self):
+        (self.root / "out" / "a.bin").write_bytes(b"old")
+        self.assertEqual(self.run_action(action="exportGltf", filepath="a.gltf")["status"], "failed")
+        self.assertEqual(self.bpy.exported, [])
+
+    def test_export_refuses_a_symlinked_folder(self):
+        os.symlink(self.root, self.root / "out" / "link")
+        self.assertEqual(self.run_action(action="exportGltf", filepath="link/a.glb")["status"], "failed")
+        self.assertEqual(self.bpy.exported, [])
+
+    def test_export_disabled_without_output_dir(self):
+        self.target.configure_action_dirs(str(self.root / "in"), "")
+        self.assertEqual(self.run_action(action="exportGltf", filepath="a.glb")["status"], "failed")
+
+    def test_export_cancelled_or_no_file_is_failed(self):
+        self.bpy.export_result = {"CANCELLED"}
+        self.assertEqual(self.run_action(action="exportGltf", filepath="a.glb")["status"], "failed")
+        self.bpy.export_result, self.bpy.export_writes = {"FINISHED"}, False
+        receipt = self.run_action(action="exportGltf", filepath="b.glb")
+        self.assertEqual((receipt["status"], receipt["message"]), ("failed", "glTF export wrote no file."))
+
+    def test_export_names_the_missing_selection_object(self):
+        receipt = self.run_action(action="exportGltf", filepath="a.glb", selection=["Cube", "Nope"])
+        self.assertEqual(receipt["message"], "Selection object was not found: Nope")
+
+    def test_export_is_advertised(self):
+        self.assertIn("asset.export.gltf", bt.CAPABILITIES)
 
     # renderStill
     def test_render_still_writes_inside_output_dir_and_restores_settings(self):
