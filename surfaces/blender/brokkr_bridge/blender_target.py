@@ -5,10 +5,12 @@ import math
 import os
 import sys
 import uuid
+from array import array
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import node_actions as na
 from . import scene_actions as sa
 from .server_guard import BindRefused, SessionGuard, check_bind, guarded_server_class, is_loopback_host, purge_command_intents
 
@@ -32,6 +34,10 @@ SYNC_VAR_SCHEMA = "brokkr.sync.var.v0"
 SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
 SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
 
+EVALUATED_POSITION_CAP = 256
+EVALUATED_VERTEX_LIMIT = 1_000_000
+EVALUATED_INSTANCE_SCAN_LIMIT = 100_000  # depsgraph items visited per capture; iterating one in Python costs ~5 us
+
 CAPABILITIES = (
     "cultcache.mirror.publish",
     "cultcache.intent.watch",
@@ -50,6 +56,8 @@ CAPABILITIES = (
     "light.write",
     "world.write",
     "render.still",
+    "nodegraph.geometry.write",
+    "geometry.evaluated.read",
     "command.receipt.publish",
 )
 
@@ -73,6 +81,7 @@ class BrokkrBlenderTarget:
         self._debug_mirror_root: str = ""
         self.import_dir: str = ""
         self.output_dir: str = ""
+        self.nodes = na.NodeActions(bpy_module)
 
     def configure_action_dirs(self, import_dir: str, output_dir: str) -> None:
         """The directories importGltf and renderStill may touch; empty leaves that action disabled."""
@@ -441,6 +450,7 @@ class BrokkrBlenderTarget:
 
     def capture_snapshot(self, context: Any) -> dict[str, Any]:
         bpy = self.bpy
+        scan = self._instance_scan() if any(o.type == "MESH" and len(o.modifiers) for o in bpy.data.objects) else None
         selected = [item.name for item in context.selected_objects if item is not None]
         active_object = context.active_object.name if context.active_object else ""
         active_scene = context.scene.name if context.scene else ""
@@ -463,7 +473,7 @@ class BrokkrBlenderTarget:
             "imageCount": len(bpy.data.images),
             "capabilities": list(CAPABILITIES),
             "scenes": [self._scene_snapshot(scene) for scene in bpy.data.scenes],
-            "objects": [self._object_snapshot(obj) for obj in bpy.data.objects],
+            "objects": [self._object_snapshot(obj, scan) for obj in bpy.data.objects],
             "materials": [self._material_snapshot(material) for material in bpy.data.materials],
             "collections": [self._collection_snapshot(collection) for collection in bpy.data.collections],
         }
@@ -497,6 +507,9 @@ class BrokkrBlenderTarget:
                 return self._set_world(context, command)
             if action == "renderStill":
                 return self._render_still(context, command)
+            if action in na.NodeActions.ACTIONS:
+                message, name = self.nodes.execute(action, command)
+                return self._receipt(command, "accepted", message, name)
             return self._receipt(command, "failed", f"Unsupported Blender command action: {action}", "")
         except sa.ActionRefused as error:
             return self._receipt(command, "failed", str(error), "")
@@ -573,6 +586,10 @@ class BrokkrBlenderTarget:
         property_name = command.get("propertyName") or "brokkrValue"
         if property_name.startswith("customProperties."):
             property_name = property_name[len("customProperties."):]
+        modifier_name = na.drives_modifier_input(obj, property_name)
+        if modifier_name:
+            return self._receipt(command, "failed", f"{property_name!r} is an input of Geometry Nodes modifier {modifier_name!r}; "
+                                 "a custom property does not drive it, use setModifierInput.", obj.name)
         obj[property_name] = command.get("value")
         return self._receipt(command, "accepted", "Blender custom property updated.", obj.name)
 
@@ -761,7 +778,7 @@ class BrokkrBlenderTarget:
             "collectionName": scene.collection.name if scene.collection else "",
         }
 
-    def _object_snapshot(self, obj: Any) -> dict[str, Any]:
+    def _object_snapshot(self, obj: Any, scan: Any = None) -> dict[str, Any]:
         data = obj.data if hasattr(obj, "data") else None
         return {
             "name": obj.name,
@@ -780,6 +797,7 @@ class BrokkrBlenderTarget:
             "constraints": [constraint.name for constraint in obj.constraints],
             "camera": self._camera_snapshot(data) if obj.type == "CAMERA" and data else None,
             "mesh": self._mesh_snapshot(data) if obj.type == "MESH" and data else None,
+            "evaluated": self._evaluated_snapshot(obj, scan),
             "customProperties": self._custom_properties(obj.items()),
         }
 
@@ -800,6 +818,70 @@ class BrokkrBlenderTarget:
             "uvLayerCount": len(mesh.uv_layers),
             "shapeKeyCount": len(mesh.shape_keys.key_blocks) if mesh.shape_keys else 0,
         }
+
+    def _instance_scan(self) -> Any:
+        """One pass over the depsgraph's instances: per original parent object, the count, the first locations
+        and the running bounds (world space). Nothing is kept per instance beyond the cap."""
+        depsgraph = self.bpy.context.evaluated_depsgraph_get()
+        depsgraph.update()
+        found: dict[str, dict[str, Any]] = {}
+        visited = 0
+        complete = True
+        for item in depsgraph.object_instances:
+            visited += 1
+            if visited > EVALUATED_INSTANCE_SCAN_LIMIT:
+                complete = False
+                break
+            if not item.is_instance or item.parent is None:
+                continue
+            entry = found.setdefault(item.parent.original.name, {"count": 0, "first": [], "min": None, "max": None})
+            point = tuple(float(c) for c in item.matrix_world.translation)
+            entry["count"] += 1
+            if len(entry["first"]) < EVALUATED_POSITION_CAP:
+                entry["first"].append([round(c, 5) for c in point])
+            entry["min"] = list(point) if entry["min"] is None else [min(a, b) for a, b in zip(entry["min"], point)]
+            entry["max"] = list(point) if entry["max"] is None else [max(a, b) for a, b in zip(entry["max"], point)]
+        return depsgraph, found, complete
+
+    def _evaluated_snapshot(self, obj: Any, scan: Any) -> dict[str, Any] | None:
+        """What the modifier stack produced, for mesh objects that have one. Vertex positions and their bounds
+        are in the object's local space; instance locations and their bounds are world space. A Geometry Nodes
+        object's own mesh is empty, so the base mesh counts say nothing about it. Above EVALUATED_VERTEX_LIMIT
+        vertices only the counts are read, and any non-finite coordinate drops the positions and sets nonFinite."""
+        if obj.type != "MESH" or not len(obj.modifiers) or scan is None:
+            return None
+        depsgraph, found, complete = scan
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        try:
+            count = len(mesh.vertices)
+            result = {"vertexCount": count, "edgeCount": len(mesh.edges), "polygonCount": len(mesh.polygons)}
+            coords = array("f", bytes(12 * count)) if 0 < count <= EVALUATED_VERTEX_LIMIT else None
+            if coords is not None:
+                mesh.vertices.foreach_get("co", coords)
+        finally:
+            evaluated.to_mesh_clear()
+        entry = found.get(obj.name)
+        reached = entry is not None
+        entry = entry or {"count": 0, "first": [], "min": [], "max": []}
+        finite = all(math.isfinite(c) for c in coords) if coords is not None else True
+        finite = finite and all(math.isfinite(c) for c in (entry["min"] or []) + (entry["max"] or []) + [c for p in entry["first"] for c in p])
+        points = [coords[i:i + 3] for i in range(0, 3 * count, 3)] if coords is not None else []
+        result.update({
+            # An object the stopped scan never reached has an unknown count, not zero.
+            "instanceCount": entry["count"] if complete or reached else None,
+            "instancesComplete": complete,
+            "positionsSkipped": count > EVALUATED_VERTEX_LIMIT,
+            "nonFinite": not finite,
+            "vertexBoundsMin": [min(p[a] for p in points) for a in range(3)] if points and finite else [],
+            "vertexBoundsMax": [max(p[a] for p in points) for a in range(3)] if points and finite else [],
+            "vertexLocations": [[round(c, 5) for c in p] for p in points[:EVALUATED_POSITION_CAP]] if finite else [],
+            "instanceBoundsMin": entry["min"] if finite and entry["min"] else [],
+            "instanceBoundsMax": entry["max"] if finite and entry["max"] else [],
+            "instanceLocations": entry["first"] if finite else [],
+            "truncated": count > EVALUATED_POSITION_CAP or entry["count"] > EVALUATED_POSITION_CAP,
+        })
+        return result
 
     def _modifier_snapshot(self, modifier: Any) -> dict[str, Any]:
         return {
