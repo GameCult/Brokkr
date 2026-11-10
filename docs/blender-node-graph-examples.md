@@ -370,7 +370,7 @@ New gaps this revision found, none in the original list:
 | # | gap | status |
 |---|---|---|
 | 12 | **Interface identifiers are opaque** (`Socket_N`): group ops cannot address `gin.Radius` | resolved in design: name to identifier at apply time, `socket_ambiguous`, identifiers in read-back |
-| 13 | **`modifier[identifier]` does not exist on 5.2.3**: `setModifierInput` as first written would fail | corrected: `modifier.properties.inputs.<id>.value`, plus `update_tag` |
+| 13 | **`modifier[identifier]` does not exist on 5.2.3**: `setModifierInput` as first written would fail | corrected: `getattr(modifier.properties.inputs, id).value`, plus `update_tag` |
 | 14 | **Zone nodes and item nodes carry virtual `__extend__` sockets** that must not enter the document | read-back skips `NodeSocketVirtual` |
 | 15 | **Evaluation can run unbounded work** (Repeat `Iterations` is data) | literal cap and an explicit, serialized `queryEvaluated`; link-fed values stay a stated residual risk |
 

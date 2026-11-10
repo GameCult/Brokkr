@@ -210,7 +210,7 @@ Receipts keep `accepted`/`failed`, with `message` naming the rule; the receipt's
 | `linkNodeGroupAsset` | `library`, `groupName`, optional `link` (default true), optional `localName` | Brings a node group from an allowed library `.blend` into this file (`bpy.data.libraries.load(path, link=link, assets_only=True)`), see "Library node groups". Already present: `accepted`. |
 | `queryEvaluated` | `objectName`, optional `frame` | Publishes a `brokkr.blender.evaluated_geometry.v0` record for the object's evaluated result, see "Evaluated read-back". Read-only. |
 | `assignNodeTree` | `treeKind` (`geometry`), `treeKey`, `objectName`, optional `modifierName` | Adds or reuses a Geometry Nodes modifier named `modifierName` (default `Brokkr GeoNodes`) on the object and sets its `node_group`. `setModifierInput` below sets its exposed inputs. |
-| `setModifierInput` | `objectName`, `modifierName`, `socket` (interface identifier), `value` | Sets a Geometry Nodes modifier input, validated against the group's interface type. **On Blender 5.2.3 the access is `modifier.properties.inputs.<identifier>.value = v` [verified]; `modifier[identifier]` raises (the modifier no longer supports ID properties), so an implementation that follows the documented 4.x idiom fails.** Object/material inputs use the same `value`; attribute-name inputs use `attribute_name`. The adapter then calls `object.update_tag()`: without it a headless re-evaluation returned the previous result **[verified]**. |
+| `setModifierInput` | `objectName`, `modifierName`, `socket` (interface identifier), `value` | Sets a Geometry Nodes modifier input, validated against the group's interface type. **On Blender 5.2.3 the access is `getattr(modifier.properties.inputs, identifier).value = v` [verified]; `modifier[identifier]` raises, and so does indexing: `modifier.properties.inputs[identifier]` is a raw ID property group with no `.value` (the modifier no longer supports ID properties), so an implementation that follows the documented 4.x idiom fails.** Object/material inputs use the same `value`; attribute-name inputs use `attribute_name`. The adapter then calls `object.update_tag()`: without it a headless re-evaluation returned the previous result **[verified]**. |
 
 Material and world trees need no `assign` action: `assignMaterial` and `setWorld`
 already attach them. Compositor trees belong to the scene and need none.
@@ -479,7 +479,7 @@ the repo, run by a human or on a runner with Blender):
 | area | Blender 3.x | 4.0 to 4.x | 5.x |
 |---|---|---|---|
 | group interface | `tree.inputs/outputs` | `tree.interface.new_socket(...)` | same as 4.x **[verified 5.2.3]**, plus `new_panel`, `structure_type`, `default_input`, `attribute_domain`, `hide_value`; identifiers are `Socket_N` |
-| modifier inputs | `modifier[id]` | `modifier[id]` | `modifier.properties.inputs.<id>.value`; `modifier[id]` raises **[verified 5.2.3]**; earlier 5.x unverified |
+| modifier inputs | `modifier[id]` | `modifier[id]` | `getattr(modifier.properties.inputs, id).value` (`inputs[id]` is a raw ID property group); `modifier[id]` raises **[verified 5.2.3]**; earlier 5.x unverified |
 | item sockets | none | `capture_items.new(type, name)` (4.2+) | **[verified 5.2.3]**; 4.x availability unverified |
 | material/world tree | `use_nodes = True` then `node_tree` | same | `use_nodes` is deprecated and trees may always exist; confirm |
 | compositor tree | `scene.use_nodes`, `scene.node_tree` | same | the scene's tree becomes a node group on the scene (`compositing_node_group`); confirm |
@@ -558,5 +558,5 @@ Starfire, 37 checks, all passing) established, and what it did not.
 | Library | 28 + 6 asset groups listed; link with dependencies; read-only linked group; opaque interface ids incl. Menu; group node evaluates | append (`link=False`); a user library; autoexec guard; menu value setting |
 | Evaluated | mesh counts, attribute names, `bound_box`, curves component present, `node_warnings` present, stale until `update_tag` | attribute domain/type, instances count, interactive-session timing |
 | Socket facts | Math `Value`/`Value_001`/`Value_002`; Vector Math `Vector`/`Vector_001`/`Vector_002`/`Scale`; Map Range `From_Min_FLOAT3`...; Switch `Switch`/`False`/`True` for FLOAT and GEOMETRY; Compare `A`/`B` for FLOAT and INT; node `parent`, `use_custom_color` and `color` exist; Poisson sockets exist before the property is set and flip `is_unavailable` | most other node types' identifiers |
-| Modifier | `modifier.properties.inputs.<id>.value`; `modifier[id]` raises | `bake_*`, panel state setters |
+| Modifier | `getattr(modifier.properties.inputs, id).value` (`inputs[id]` is a raw ID property group); `modifier[id]` raises | `bake_*`, panel state setters |
 | Not run at all | the add-on, any batch/rollback behaviour, shader/world/compositor trees, Blender 4.x | |
