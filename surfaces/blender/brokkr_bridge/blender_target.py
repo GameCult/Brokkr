@@ -613,12 +613,22 @@ class BrokkrBlenderTarget:
         if obj is None:
             return self._receipt(command, "failed", "Target Blender object was not found.", "")
 
+        if not (obj.data and hasattr(obj.data, "materials")):
+            return self._receipt(command, "failed", "Target object cannot receive materials.", obj.name)
+        rgba = sa.color_rgba(command)  # refused before anything is created or changed
         material_name = command.get("materialName") or "Brokkr Material"
         material = self.bpy.data.materials.get(material_name) or self.bpy.data.materials.new(material_name)
-        if obj.data and hasattr(obj.data, "materials"):
+        if rgba is not None:
+            if not material.use_nodes or material.node_tree is None:
+                material.use_nodes = True
+            nodes = material.node_tree.nodes
+            principled = nodes.get("Principled BSDF") or next(
+                (n for n in nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"), None) or nodes.new("ShaderNodeBsdfPrincipled")
+            principled.inputs["Base Color"].default_value = rgba
+            material.diffuse_color = rgba
+        if not any(slot is not None and slot.name == material.name for slot in obj.data.materials):
             obj.data.materials.append(material)
-            return self._receipt(command, "accepted", "Blender material assigned.", obj.name)
-        return self._receipt(command, "failed", "Target object cannot receive materials.", obj.name)
+        return self._receipt(command, "accepted", "Blender material assigned.", obj.name)
 
     def _import_gltf(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         name = str(command.get("filepath") or "")
