@@ -259,7 +259,11 @@ class RealServerTests(unittest.TestCase):
         self.assertEqual(server._handle_connection_message(message, {})[0]["schemaVersion"], "cultnet.error.v0")
         message[sg.TOKEN_FIELD] = self.target.session_token
         response = server._handle_connection_message(message, {})
-        self.assertIn("malformed", response[0].get("code", ""))  # past the guard, refused by the store as an empty put
+        # Past the guard: the store refuses the empty put and says so with a code. The guard's own
+        # refusal is codeless and names the token field, so either is told apart from the other
+        # without pinning the store's spelling of "an empty put is invalid".
+        self.assertTrue(response[0].get("code"))
+        self.assertNotIn(sg.TOKEN_FIELD, str(response[0]))
 
     def test_a_peer_put_is_accepted_over_tcp_because_the_target_grants_peer_writes(self):
         status = self.start()
