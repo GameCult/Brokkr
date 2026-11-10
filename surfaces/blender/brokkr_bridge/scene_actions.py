@@ -202,6 +202,21 @@ def color(command: dict[str, Any], key: str = "color") -> tuple[float, float, fl
     return (parts[0], parts[1], parts[2])
 
 
+def color_rgba(command: dict[str, Any], key: str = "color") -> tuple[float, float, float, float] | None:
+    """Linear RGB or RGBA, finite numbers in [0, 1] (RGB gets alpha 1), or None when absent."""
+    if key not in command or command[key] is None:
+        return None
+    value = command[key]
+    if not isinstance(value, (list, tuple)) or len(value) not in (3, 4):
+        raise ActionRefused(f"{key} must be [r, g, b] or [r, g, b, a].")
+    parts = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or not 0.0 <= item <= 1.0:
+            raise ActionRefused(f"{key} components must be numbers between 0 and 1.")
+        parts.append(float(item))
+    return (parts[0], parts[1], parts[2], parts[3] if len(parts) == 4 else 1.0)
+
+
 def choice(command: dict[str, Any], key: str, allowed: Iterable[str]) -> str | None:
     if key not in command or command[key] is None:
         return None
