@@ -51,6 +51,12 @@ write, not only at connect. Reads stay open. `Stop Server`, quitting, or
 disabling the add-on revokes it; it is held in memory only and never saved to
 preferences or the cache.
 
+Peer write scope: CultLib's `cultmesh_py` refuses peer writes unless an authority grants them, and the add-on
+passes `CultMeshGrantAllWrites()`. A peer that gets past the session token (or any peer, when the token is off) can
+therefore put or delete **any registered document** on the served node, not only command intents. That is acceptable
+on loopback, the default; a grant scoped to command intents is future work. Do not combine `Allow Non-Loopback Bind`
+with the token off.
+
 Run the tests (no Blender needed; `CULTLIB_PACKAGES` adds the real-server tests):
 
 ```text
@@ -101,3 +107,85 @@ Admitted command actions:
 - `setObjectCustomProperty`
 - `selectObject`
 - `assignMaterial`
+- `importGltf`
+- `exportGltf`
+- `setCamera`
+- `setLight`
+- `setWorld`
+- `renderStill`
+
+Scene action fields (all other keys are ignored; a refused intent changes nothing and
+gets a `failed` receipt whose message names the rule):
+
+- `createObject`: optional `objectType` (`MESH`, `LIGHT`, `CAMERA`, `EMPTY`; default `EMPTY`),
+  `name`, `location`. Any other `objectType` (for example `TEXT` or `CURVE`) is refused with
+  the allowed set named. A `MESH` is a cube (`size`); a `meshType` other than `CUBE`
+  (case-insensitive, no surrounding whitespace) is refused rather than ignored.
+  `meshType` is checked only when `objectType` is `MESH`; an explicit `objectType: null` is refused.
+- `importGltf`: `filepath`, `.gltf` or `.glb`, relative to the add-on preference
+  `Import Directory` (absolute paths, `..` and symlinks that resolve outside it are
+  refused). Empty `Import Directory` disables the action. Needs Blender's glTF add-on.
+- `exportGltf`: `filepath`, `.glb` (binary) or `.gltf` (separate `.bin`), relative to the
+  add-on preference `Render Output Directory` (the renderStill rules: no `..`, no links, and an
+  existing name, or an existing `.bin` beside a `.gltf`, is refused; there is no overwrite).
+  Optional `extras` (custom properties become node `extras`), `yUp`, `applyModifiers`
+  (each true by default, must be a boolean) and `selection` (a non-empty list of object
+  names; any name not found, or not in the active view layer, refuses the export; the
+  selection is touched only when one is given, and restored afterwards). Not checked: texture
+  files a `.gltf` export writes beside it (only the `.bin` is), and a link or swap made between the
+  check and the write (the same residual as renderStill).
+  The receipt message carries the written path and byte size. Needs Blender's glTF add-on.
+- `setCamera`: `targetObjectName` (a camera object); optional `lens` (mm),
+  `cameraType` (`PERSP`, `ORTHO`, `PANO`), `panoramaType` (for example
+  `EQUIRECTANGULAR`; read from the camera, or from `camera.cycles` before Blender 4.2),
+  `orthoScale`, `clipStart`, `clipEnd`, `active` (true makes it the scene camera).
+  Panoramic cameras render in Cycles.
+- `setLight`: `targetObjectName` (a light object); optional `energy` (>= 0),
+  `color` (linear `[r, g, b]`, each 0 to 1), `lightType` (`POINT`, `SUN`, `SPOT`, `AREA`).
+- `setWorld`: optional `worldName` (default: the scene's world, created if there is
+  none), `color` (`[r, g, b]`), `strength`. Edits the world's Background node.
+- `assignMaterial`: `targetObjectName` (an object with material slots, such as a mesh);
+  optional `materialName` (default `Brokkr Material`; an existing material of that name
+  is reused) and `color` (linear `[r, g, b]` or `[r, g, b, a]`, each a finite number 0
+  to 1; alpha defaults to 1). `color` sets the Principled BSDF Base Color (the node tree
+  is created if the material has none) and `diffuse_color`; a malformed `color` is
+  refused naming the field and nothing is created or changed (`"color": null` counts as absent). Without `color` an
+  existing material's colour is left as it is. Idempotent per (object, material): if the
+  object already has a slot with that material no second slot is added. Other keys are
+  ignored, as for every action.
+- `renderStill`: `outputPath` relative to the preference `Render Output Directory`,
+  ending `.png`, `.jpg` or `.exr` (same containment rules as import); optional
+  `engine` (any engine of the running Blender, case-insensitive), `resolutionX`,
+  `resolutionY` (whole numbers, 1 to 16384), `cameraName`. Engine, resolution,
+  camera, file path and format are restored after the render. The render blocks
+  Blender's UI until it finishes. In a background (`-b`) Blender on Linux, the GL
+  engines `BLENDER_WORKBENCH`, `BLENDER_EEVEE` and `BLENDER_EEVEE_NEXT` are refused
+  with a `failed` receipt when `libEGL.so.1` cannot be loaded (probed once and cached for the life of the process), because
+  rendering would abort the whole process with no receipt; `CYCLES` renders on the
+  CPU. The check applies to the scene's engine when `engine` is omitted. No such
+  check runs on Windows or macOS.
+
+The scene actions were run against Blender 5.2.3 LTS headless with
+`surfaces/blender/tests/live/headless_smoke.py` (usage in its docstring). One real
+failure it found: Blender's `engine` enum is dynamic, so `bl_rna` lists only
+`BLENDER_EEVEE`; `renderStill` now asks Blender by assignment instead.
+
+### Path rules and the residual race
+
+Both directories take plain relative names only, judged as text the same on every OS:
+no drive (`C:`, `C:foo`), UNC or `\\?\` form, leading separator, `..`, NUL, `:` anywhere
+(also NTFS streams), trailing dot or space, or Windows device name. No existing component
+may be a symlink or junction (Windows' "untrusted mount point" error on a junction counts
+as one). `renderStill` refuses any output name that already exists, including symlinks
+(even dangling) and hardlinks. `importGltf` parses the `.gltf` JSON (or a `.glb`'s first
+chunk) and refuses every `buffers[].uri` / `images[].uri` that is not `data:` or a
+relative path inside the import directory; `.gltf` files from the same folder tree work.
+
+**Residual TOCTOU.** The checks run in the add-on, and the path is re-checked (resolved
+name, plus size and modification time of the file and its references) immediately before
+use, but Blender's own importer and renderer then open the files themselves. Someone who
+can write to the import or output directory in that last gap can still swap a file or
+link in. The add-on cannot close that window from Python: make both directories writable
+only by trusted users, and treat the checks as protection against a malicious *intent*,
+not against a hostile local writer. A same-size, same-mtime content swap is also not
+detected by the re-check.

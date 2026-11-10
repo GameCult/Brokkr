@@ -244,6 +244,14 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "material.assign",
                     "selection.read",
                     "selection.write",
+                    "asset.import.gltf",
+                    "asset.export.gltf",
+                    "camera.write",
+                    "light.write",
+                    "world.write",
+                    "render.still",
+                    "nodegraph.geometry.write",
+                    "geometry.evaluated.read",
                     "sync.session.publish",
                     "sync.object.bind",
                     "sync.var.publish",
@@ -1985,6 +1993,18 @@ mod tests {
         assert!(blender.capabilities.contains(&"object.graph.read"));
         assert!(blender.capabilities.contains(&"object.transform.write"));
         assert!(blender.capabilities.contains(&"material.assign"));
+        for scene_and_graph in [
+            "asset.import.gltf",
+            "asset.export.gltf",
+            "camera.write",
+            "light.write",
+            "world.write",
+            "render.still",
+            "nodegraph.geometry.write",
+            "geometry.evaluated.read",
+        ] {
+            assert!(blender.capabilities.contains(&scene_and_graph), "{scene_and_graph}");
+        }
 
         let route_sources: Vec<_> = provider
             .realtime_routes

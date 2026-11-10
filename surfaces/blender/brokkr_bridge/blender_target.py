@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import ctypes
+import functools
 import json
 import math
 import os
 import sys
 import uuid
+from array import array
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import node_actions as na
+from . import scene_actions as sa
 from .server_guard import BindRefused, SessionGuard, check_bind, guarded_server_class, is_loopback_host, purge_command_intents
 
 PROVIDER_ID = "brokkr.blender_editor"
@@ -31,6 +36,17 @@ SYNC_VAR_SCHEMA = "brokkr.sync.var.v0"
 SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
 SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
 
+CREATABLE_OBJECT_TYPES = ("MESH", "LIGHT", "CAMERA", "EMPTY")
+
+# Engines that draw through the GL stack. A headless Linux Blender without libEGL aborts the whole
+# process inside bpy.ops.render.render for these (no receipt); CYCLES renders on the CPU.
+GL_RENDER_ENGINES = ("BLENDER_WORKBENCH", "BLENDER_EEVEE", "BLENDER_EEVEE_NEXT")
+GL_RUNTIME_LIBRARY = "libEGL.so.1"
+
+EVALUATED_POSITION_CAP = 256
+EVALUATED_VERTEX_LIMIT = 1_000_000
+EVALUATED_INSTANCE_SCAN_LIMIT = 100_000  # depsgraph items visited per capture; iterating one in Python costs ~5 us
+
 CAPABILITIES = (
     "cultcache.mirror.publish",
     "cultcache.intent.watch",
@@ -44,6 +60,14 @@ CAPABILITIES = (
     "material.assign",
     "selection.read",
     "selection.write",
+    "asset.import.gltf",
+    "asset.export.gltf",
+    "camera.write",
+    "light.write",
+    "world.write",
+    "render.still",
+    "nodegraph.geometry.write",
+    "geometry.evaluated.read",
     "command.receipt.publish",
 )
 
@@ -65,6 +89,14 @@ class BrokkrBlenderTarget:
         self._guard: SessionGuard | None = None
         self._cultmesh_module: str = ""
         self._debug_mirror_root: str = ""
+        self.import_dir: str = ""
+        self.output_dir: str = ""
+        self.nodes = na.NodeActions(bpy_module)
+
+    def configure_action_dirs(self, import_dir: str, output_dir: str) -> None:
+        """The directories importGltf and renderStill may touch; empty leaves that action disabled."""
+        self.import_dir = self.bpy.path.abspath(import_dir) if import_dir else ""
+        self.output_dir = self.bpy.path.abspath(output_dir) if output_dir else ""
 
     def resolve_cache_path(self, cache_path: str) -> str:
         return self.bpy.path.abspath(cache_path or DEFAULT_CULTMESH_CACHE_PATH)
@@ -332,6 +364,12 @@ class BrokkrBlenderTarget:
         guard = SessionGuard() if require_token else None
         if guard is not None:
             server_class = guarded_server_class(server_class, guard)
+        # The add-on's own clients put command intents to this server, so it grants peer writes
+        # explicitly: cultmesh_py refuses them by default, and the session token above is what
+        # authenticates a peer when it is required. A cultmesh_py older than the gate has no
+        # CultMeshGrantAllWrites and already accepts every write.
+        grant_all = getattr(cultmesh, "CultMeshGrantAllWrites", None)
+        authority_args = {"write_authority": grant_all()} if grant_all is not None else {}
         server = server_class(
             node=node,
             verse_catalog=verse_catalog,
@@ -341,6 +379,7 @@ class BrokkrBlenderTarget:
             display_name="Brokkr Blender Editor",
             max_snapshot_documents=int(max_snapshot_documents),
             max_snapshot_bytes=int(max_snapshot_bytes),
+            **authority_args,
         ).start()
 
         endpoint = f"cultnet://{resolved_host}:{server.port}"
@@ -421,6 +460,7 @@ class BrokkrBlenderTarget:
 
     def capture_snapshot(self, context: Any) -> dict[str, Any]:
         bpy = self.bpy
+        scan = self._instance_scan() if any(o.type == "MESH" and len(o.modifiers) for o in bpy.data.objects) else None
         selected = [item.name for item in context.selected_objects if item is not None]
         active_object = context.active_object.name if context.active_object else ""
         active_scene = context.scene.name if context.scene else ""
@@ -443,7 +483,7 @@ class BrokkrBlenderTarget:
             "imageCount": len(bpy.data.images),
             "capabilities": list(CAPABILITIES),
             "scenes": [self._scene_snapshot(scene) for scene in bpy.data.scenes],
-            "objects": [self._object_snapshot(obj) for obj in bpy.data.objects],
+            "objects": [self._object_snapshot(obj, scan) for obj in bpy.data.objects],
             "materials": [self._material_snapshot(material) for material in bpy.data.materials],
             "collections": [self._collection_snapshot(collection) for collection in bpy.data.collections],
         }
@@ -467,12 +507,37 @@ class BrokkrBlenderTarget:
                 return self._select_object(context, command)
             if action == "assignMaterial":
                 return self._assign_material(context, command)
+            if action == "importGltf":
+                return self._import_gltf(context, command)
+            if action == "exportGltf":
+                return self._export_gltf(context, command)
+            if action == "setCamera":
+                return self._set_camera(context, command)
+            if action == "setLight":
+                return self._set_light(context, command)
+            if action == "setWorld":
+                return self._set_world(context, command)
+            if action == "renderStill":
+                return self._render_still(context, command)
+            if action in na.NodeActions.ACTIONS:
+                message, name = self.nodes.execute(action, command)
+                return self._receipt(command, "accepted", message, name)
             return self._receipt(command, "failed", f"Unsupported Blender command action: {action}", "")
+        except sa.ActionRefused as error:
+            return self._receipt(command, "failed", str(error), "")
         except Exception as error:
             return self._receipt(command, "failed", str(error), "")
 
     def _create_object(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         object_type = command.get("objectType", "EMPTY")
+        if not isinstance(object_type, str) or object_type not in CREATABLE_OBJECT_TYPES:
+            shown = object_type if isinstance(object_type, str) else repr(object_type)
+            raise sa.ActionRefused(
+                f"objectType {shown!r} cannot be created; allowed: {', '.join(CREATABLE_OBJECT_TYPES)}.")
+        mesh_type = command.get("meshType")
+        if object_type == "MESH" and mesh_type is not None and (
+                not isinstance(mesh_type, str) or mesh_type.upper() != "CUBE"):
+            raise sa.ActionRefused(f"meshType {mesh_type!r} is not available; a MESH is a CUBE.")
         name = command.get("name") or f"Brokkr {object_type.title()}"
         location = _vector(command.get("location"), 3, (0.0, 0.0, 0.0))
 
@@ -482,7 +547,7 @@ class BrokkrBlenderTarget:
             self.bpy.ops.object.light_add(type=command.get("lightType", "POINT"), location=location)
         elif object_type == "CAMERA":
             self.bpy.ops.object.camera_add(location=location)
-        else:
+        else:  # EMPTY
             self.bpy.ops.object.empty_add(type=command.get("emptyDisplayType", "PLAIN_AXES"), location=location)
 
         obj = context.object
@@ -541,6 +606,10 @@ class BrokkrBlenderTarget:
         property_name = command.get("propertyName") or "brokkrValue"
         if property_name.startswith("customProperties."):
             property_name = property_name[len("customProperties."):]
+        modifier_name = na.drives_modifier_input(obj, property_name)
+        if modifier_name:
+            return self._receipt(command, "failed", f"{property_name!r} is an input of Geometry Nodes modifier {modifier_name!r}; "
+                                 "a custom property does not drive it, use setModifierInput.", obj.name)
         obj[property_name] = command.get("value")
         return self._receipt(command, "accepted", "Blender custom property updated.", obj.name)
 
@@ -561,12 +630,229 @@ class BrokkrBlenderTarget:
         if obj is None:
             return self._receipt(command, "failed", "Target Blender object was not found.", "")
 
+        if not (obj.data and hasattr(obj.data, "materials")):
+            return self._receipt(command, "failed", "Target object cannot receive materials.", obj.name)
+        rgba = sa.color_rgba(command)  # refused before anything is created or changed
         material_name = command.get("materialName") or "Brokkr Material"
         material = self.bpy.data.materials.get(material_name) or self.bpy.data.materials.new(material_name)
-        if obj.data and hasattr(obj.data, "materials"):
+        if rgba is not None:
+            if not material.use_nodes or material.node_tree is None:
+                material.use_nodes = True
+            nodes = material.node_tree.nodes
+            principled = nodes.get("Principled BSDF") or next(
+                (n for n in nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"), None) or nodes.new("ShaderNodeBsdfPrincipled")
+            principled.inputs["Base Color"].default_value = rgba
+            material.diffuse_color = rgba
+        if not any(slot is not None and slot.name == material.name for slot in obj.data.materials):
             obj.data.materials.append(material)
-            return self._receipt(command, "accepted", "Blender material assigned.", obj.name)
-        return self._receipt(command, "failed", "Target object cannot receive materials.", obj.name)
+        return self._receipt(command, "accepted", "Blender material assigned.", obj.name)
+
+    def _import_gltf(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        name = str(command.get("filepath") or "")
+        path = sa.resolve_inside(self.import_dir, name, "import")
+        sa.require_gltf(path)
+        stamped = sa.fingerprint([path])  # before the parse, so a swap during it shows
+        references = sa.gltf_references(path)
+        existing = references  # gltf_references refuses a missing one
+        checked = (stamped, sa.fingerprint(existing))
+        # Re-check immediately before use: the same path, the same files, the same bytes' stats.
+        # Blender then opens the files itself, so a swap in that last gap is not prevented
+        # (residual TOCTOU): the import directory must only be writable by trusted users.
+        if sa.resolve_inside(self.import_dir, name, "import") != path or \
+                (sa.fingerprint([path]), sa.fingerprint(existing)) != checked:
+            raise sa.ActionRefused("Import file changed while it was being checked.")
+        before = set(self.bpy.data.objects.keys())
+        self.bpy.ops.import_scene.gltf(filepath=str(path))
+        added = sorted(set(self.bpy.data.objects.keys()) - before)
+        return self._receipt(command, "accepted", f"Imported {len(added)} object(s) from {path.name}.", added[0] if added else "")
+
+    def _export_gltf(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        """Write the scene (or the named objects) as .glb or .gltf under the output directory."""
+        name = command.get("filepath")
+        if not isinstance(name, str):
+            raise sa.ActionRefused("filepath must be a string.")
+        path = sa.resolve_inside(self.output_dir, name, "output", new_file=True)
+        suffix = path.suffix.lower()
+        if suffix not in sa.GLTF_EXTENSIONS:
+            raise sa.ActionRefused(f"Export path must end in {' or '.join(sa.GLTF_EXTENSIONS)}.")
+        options = {}
+        for field, key in (("extras", "export_extras"), ("yUp", "export_yup"), ("applyModifiers", "export_apply")):
+            value = command.get(field, True)
+            if not isinstance(value, bool):
+                raise sa.ActionRefused(f"{field} must be true or false.")
+            options[key] = value
+        names = command.get("selection")
+        chosen = []
+        if names is not None:
+            if not isinstance(names, list) or not names or not all(isinstance(n, str) and n for n in names):
+                raise sa.ActionRefused("selection must be a non-empty list of object names.")
+            missing = [n for n in names if n not in self.bpy.data.objects]
+            if missing:
+                raise sa.ActionRefused(f"Selection object was not found: {missing[0]}")
+            chosen = [self.bpy.data.objects[n] for n in dict.fromkeys(names)]
+            # select_set raises for an object with no base in the view layer (another scene, an
+            # orphan, an excluded collection), and use_selection exports only selected layer objects.
+            off_layer = [o.name for o in chosen if o.name not in context.view_layer.objects]
+            if off_layer:
+                raise sa.ActionRefused(f"Selection object is not in the active view layer: {off_layer[0]}")
+        binary = path.with_suffix(".bin")
+        if suffix == ".gltf" and os.path.lexists(binary):
+            raise sa.ActionRefused("output path already exists; output actions never overwrite: " + binary.name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Re-check after the folders exist and just before use (residual TOCTOU as in renderStill).
+        if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
+            raise sa.ActionRefused("Output path changed while it was being checked.")
+        # The selection is touched only when one was asked for, and only on view-layer objects.
+        objects = list(context.view_layer.objects.values()) if chosen else []
+        saved = [(obj, obj.select_get()) for obj in objects]
+        try:
+            for obj in objects:
+                obj.select_set(obj in chosen)
+            result = self.bpy.ops.export_scene.gltf(
+                filepath=str(path), export_format="GLB" if suffix == ".glb" else "GLTF_SEPARATE",
+                use_selection=bool(chosen), **options)
+        finally:
+            for obj, state in saved:
+                if obj.name in self.bpy.data.objects:
+                    obj.select_set(state)
+        if "FINISHED" not in result:
+            raise sa.ActionRefused(f"glTF export did not finish: {sorted(result)}")
+        if not path.is_file():
+            raise sa.ActionRefused("glTF export wrote no file.")
+        return self._receipt(command, "accepted", f"Exported glTF to {path} ({path.stat().st_size} bytes).", "")
+
+    def _resolve_typed(self, command: dict[str, Any], object_type: str) -> Any:
+        obj = self._resolve_object(command)
+        if obj is None:
+            raise sa.ActionRefused("Target Blender object was not found.")
+        if obj.type != object_type:
+            raise sa.ActionRefused(f"Target Blender object is not a {object_type}.")
+        return obj
+
+    def _set_camera(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        obj = self._resolve_typed(command, "CAMERA")
+        camera = obj.data
+        # Validate everything before changing anything, so a refused intent leaves the camera alone.
+        lens = sa.number(command, "lens", 1.0, sa.MAX_LENS_MM)
+        camera_type = sa.choice(command, "cameraType", sa.CAMERA_TYPES)
+        ortho_scale = sa.number(command, "orthoScale", 0.001, 100000.0)
+        clip_start = sa.number(command, "clipStart", 0.0001, 1.0e6)
+        clip_end = sa.number(command, "clipEnd", 0.001, 1.0e7)
+        panorama_type = sa.choice(command, "panoramaType", self._panorama_types(camera))
+        if lens is not None:
+            camera.lens = lens
+        if camera_type is not None:
+            camera.type = camera_type
+        if ortho_scale is not None:
+            camera.ortho_scale = ortho_scale
+        if clip_start is not None:
+            camera.clip_start = clip_start
+        if clip_end is not None:
+            camera.clip_end = clip_end
+        if panorama_type is not None:
+            # Blender 4.2 moved panorama_type from camera.cycles to the camera itself.
+            holder = camera if hasattr(camera, "panorama_type") else camera.cycles
+            holder.panorama_type = panorama_type
+        if command.get("active"):
+            context.scene.camera = obj
+        return self._receipt(command, "accepted", "Blender camera updated.", obj.name)
+
+    def _panorama_types(self, camera: Any) -> tuple[str, ...]:
+        holder = camera if hasattr(camera, "panorama_type") else getattr(camera, "cycles", camera)
+        try:
+            return tuple(item.identifier for item in holder.bl_rna.properties["panorama_type"].enum_items)
+        except (KeyError, AttributeError):
+            return ("EQUIRECTANGULAR", "EQUIDISTANT", "FISHEYE_EQUISOLID", "MIRRORBALL")
+
+    def _set_light(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        obj = self._resolve_typed(command, "LIGHT")
+        energy = sa.number(command, "energy", 0.0, 1.0e7)
+        light_color = sa.color(command)
+        light_type = sa.choice(command, "lightType", sa.LIGHT_TYPES)
+        if energy is not None:
+            obj.data.energy = energy
+        if light_color is not None:
+            obj.data.color = light_color
+        if light_type is not None:
+            obj.data.type = light_type
+        return self._receipt(command, "accepted", "Blender light updated.", obj.name)
+
+    def _set_world(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        world_color = sa.color(command)
+        strength = sa.number(command, "strength", 0.0, 1.0e6)
+        name = str(command.get("worldName") or "")
+        scene = context.scene
+        world = self.bpy.data.worlds.get(name) if name else scene.world
+        if world is None:
+            world = self.bpy.data.worlds.new(name or "Brokkr World")
+        scene.world = world
+        world.use_nodes = True
+        background = world.node_tree.nodes.get("Background")
+        if background is None:
+            raise sa.ActionRefused("World has no Background node to configure.")
+        if world_color is not None:
+            background.inputs["Color"].default_value = (*world_color, 1.0)
+        if strength is not None:
+            background.inputs["Strength"].default_value = strength
+        return self._receipt(command, "accepted", "Blender world updated.", world.name)
+
+    def _render_still(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
+        scene = context.scene
+        render = scene.render
+        name = str(command.get("outputPath") or "")
+        path = sa.resolve_inside(self.output_dir, name, "output", new_file=True)
+        file_format = sa.still_format(path)
+        # The engine enum is dynamic (Cycles and add-on engines register at runtime), and RNA's
+        # enum_items on a dynamic enum lists only its static defaults, so the running Blender is
+        # asked by assignment below and a TypeError there is the refusal.
+        engine = command.get("engine")
+        if engine is not None and (not isinstance(engine, str) or not engine.strip()):
+            raise sa.ActionRefused("engine must be a render engine identifier.")
+        engine = engine.strip().upper() if engine else None
+        width = sa.integer(command, "resolutionX", 1, sa.MAX_RESOLUTION)
+        height = sa.integer(command, "resolutionY", 1, sa.MAX_RESOLUTION)
+        camera_name = str(command.get("cameraName") or "")
+        camera = None
+        if camera_name:
+            camera = self.bpy.data.objects.get(camera_name)
+            if camera is None or camera.type != "CAMERA":
+                raise sa.ActionRefused(f"Camera object was not found: {camera_name}")
+        # Render settings are the intent's for this render only; put them back afterwards.
+        saved = (render.engine, render.resolution_x, render.resolution_y, render.filepath,
+                 render.image_settings.file_format, scene.camera)
+        try:
+            if engine is not None:
+                try:
+                    render.engine = engine
+                except TypeError:
+                    raise sa.ActionRefused(f"engine {engine} is not available in this Blender.") from None
+            if render.engine in GL_RENDER_ENGINES and getattr(getattr(self.bpy, "app", None), "background", False):
+                missing = missing_gl_library()
+                if missing:
+                    raise sa.ActionRefused(
+                        f"engine {render.engine} needs {missing}, which this headless Blender cannot load "
+                        "(rendering would abort the process); use engine CYCLES.")
+            if width is not None:
+                render.resolution_x = width
+            if height is not None:
+                render.resolution_y = height
+            if camera is not None:
+                scene.camera = camera
+            render.filepath = str(path)
+            render.image_settings.file_format = file_format
+            # Folders are made only after every refusal that can still come from Blender (an unknown
+            # engine), so a refused render leaves none behind. Then re-check after the folders exist
+            # and immediately before use: no link was swapped in, and the name is still free. Blender
+            # opens the file itself afterwards, so a swap in that last gap is not prevented (residual
+            # TOCTOU): the output directory must only be writable by trusted users.
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
+                raise sa.ActionRefused("Output path changed while it was being checked.")
+            self.bpy.ops.render.render(write_still=True)
+        finally:
+            (render.engine, render.resolution_x, render.resolution_y, render.filepath,
+             render.image_settings.file_format, scene.camera) = saved
+        return self._receipt(command, "accepted", f"Rendered still to {path.name}.", scene.name)
 
     def _resolve_object(self, command: dict[str, Any]) -> Any:
         name = command.get("targetObjectName") or command.get("objectName")
@@ -583,7 +869,7 @@ class BrokkrBlenderTarget:
             "collectionName": scene.collection.name if scene.collection else "",
         }
 
-    def _object_snapshot(self, obj: Any) -> dict[str, Any]:
+    def _object_snapshot(self, obj: Any, scan: Any = None) -> dict[str, Any]:
         data = obj.data if hasattr(obj, "data") else None
         return {
             "name": obj.name,
@@ -602,6 +888,7 @@ class BrokkrBlenderTarget:
             "constraints": [constraint.name for constraint in obj.constraints],
             "camera": self._camera_snapshot(data) if obj.type == "CAMERA" and data else None,
             "mesh": self._mesh_snapshot(data) if obj.type == "MESH" and data else None,
+            "evaluated": self._evaluated_snapshot(obj, scan),
             "customProperties": self._custom_properties(obj.items()),
         }
 
@@ -622,6 +909,70 @@ class BrokkrBlenderTarget:
             "uvLayerCount": len(mesh.uv_layers),
             "shapeKeyCount": len(mesh.shape_keys.key_blocks) if mesh.shape_keys else 0,
         }
+
+    def _instance_scan(self) -> Any:
+        """One pass over the depsgraph's instances: per original parent object, the count, the first locations
+        and the running bounds (world space). Nothing is kept per instance beyond the cap."""
+        depsgraph = self.bpy.context.evaluated_depsgraph_get()
+        depsgraph.update()
+        found: dict[str, dict[str, Any]] = {}
+        visited = 0
+        complete = True
+        for item in depsgraph.object_instances:
+            visited += 1
+            if visited > EVALUATED_INSTANCE_SCAN_LIMIT:
+                complete = False
+                break
+            if not item.is_instance or item.parent is None:
+                continue
+            entry = found.setdefault(item.parent.original.name, {"count": 0, "first": [], "min": None, "max": None})
+            point = tuple(float(c) for c in item.matrix_world.translation)
+            entry["count"] += 1
+            if len(entry["first"]) < EVALUATED_POSITION_CAP:
+                entry["first"].append([round(c, 5) for c in point])
+            entry["min"] = list(point) if entry["min"] is None else [min(a, b) for a, b in zip(entry["min"], point)]
+            entry["max"] = list(point) if entry["max"] is None else [max(a, b) for a, b in zip(entry["max"], point)]
+        return depsgraph, found, complete
+
+    def _evaluated_snapshot(self, obj: Any, scan: Any) -> dict[str, Any] | None:
+        """What the modifier stack produced, for mesh objects that have one. Vertex positions and their bounds
+        are in the object's local space; instance locations and their bounds are world space. A Geometry Nodes
+        object's own mesh is empty, so the base mesh counts say nothing about it. Above EVALUATED_VERTEX_LIMIT
+        vertices only the counts are read, and any non-finite coordinate drops the positions and sets nonFinite."""
+        if obj.type != "MESH" or not len(obj.modifiers) or scan is None:
+            return None
+        depsgraph, found, complete = scan
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        try:
+            count = len(mesh.vertices)
+            result = {"vertexCount": count, "edgeCount": len(mesh.edges), "polygonCount": len(mesh.polygons)}
+            coords = array("f", bytes(12 * count)) if 0 < count <= EVALUATED_VERTEX_LIMIT else None
+            if coords is not None:
+                mesh.vertices.foreach_get("co", coords)
+        finally:
+            evaluated.to_mesh_clear()
+        entry = found.get(obj.name)
+        reached = entry is not None
+        entry = entry or {"count": 0, "first": [], "min": [], "max": []}
+        finite = all(math.isfinite(c) for c in coords) if coords is not None else True
+        finite = finite and all(math.isfinite(c) for c in (entry["min"] or []) + (entry["max"] or []) + [c for p in entry["first"] for c in p])
+        points = [coords[i:i + 3] for i in range(0, 3 * count, 3)] if coords is not None else []
+        result.update({
+            # An object the stopped scan never reached has an unknown count, not zero.
+            "instanceCount": entry["count"] if complete or reached else None,
+            "instancesComplete": complete,
+            "positionsSkipped": count > EVALUATED_VERTEX_LIMIT,
+            "nonFinite": not finite,
+            "vertexBoundsMin": [min(p[a] for p in points) for a in range(3)] if points and finite else [],
+            "vertexBoundsMax": [max(p[a] for p in points) for a in range(3)] if points and finite else [],
+            "vertexLocations": [[round(c, 5) for c in p] for p in points[:EVALUATED_POSITION_CAP]] if finite else [],
+            "instanceBoundsMin": entry["min"] if finite and entry["min"] else [],
+            "instanceBoundsMax": entry["max"] if finite and entry["max"] else [],
+            "instanceLocations": entry["first"] if finite else [],
+            "truncated": count > EVALUATED_POSITION_CAP or entry["count"] > EVALUATED_POSITION_CAP,
+        })
+        return result
 
     def _modifier_snapshot(self, modifier: Any) -> dict[str, Any]:
         return {
@@ -761,6 +1112,19 @@ def _load_cultmesh(cultlib_py_src: str) -> tuple[Any, Any]:
             "to the CultLib packages directory or install cultcache-py, cultnet-py and cultmesh-py into Blender's Python."
         ) from exc
     return cultmesh_py, cultcache_py
+
+
+@functools.lru_cache(maxsize=None)
+def missing_gl_library() -> str | None:
+    """The GL runtime library this host cannot load, or None. Probed once, on Linux only: on
+    Windows and macOS a failed GPU render is not a headless-EGL abort."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        ctypes.CDLL(GL_RUNTIME_LIBRARY)
+    except OSError:
+        return GL_RUNTIME_LIBRARY
+    return None
 
 
 def _now() -> str:

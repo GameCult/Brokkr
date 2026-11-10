@@ -1,0 +1,141 @@
+{
+ "blender": "5.2.3 LTS",
+ "setups": {
+  "ring": {
+   "native_instances": 8,
+   "brokkr_objects": 8,
+   "positions_equal": true,
+   "actions": 16,
+   "failed_actions": 0,
+   "brokkr_object_dimensions": [
+    0.3,
+    0.3,
+    0.3
+   ]
+  },
+  "boundary_step": {
+   "native": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ]
+   ],
+   "brokkr": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ]
+   ],
+   "equal": true,
+   "actions": 6,
+   "note": "equality needs the client to evaluate the field; Brokkr only carries the result"
+  },
+  "scatter_replay": {
+   "native_instances": 38,
+   "equal": true,
+   "actions": 76,
+   "note": "positions were read with bpy depsgraph, not through any Brokkr surface",
+   "render": [
+    "accepted",
+    "Rendered still to scatter_replay.png."
+   ]
+  },
+  "scatter_own_rng": {
+   "count_equal": true,
+   "positions_equal": false
+  }
+ },
+ "gaps": {
+  "no_node_actions": {
+   "createNodeGroup": [
+    "failed",
+    "Unsupported Blender command action: createNodeGroup"
+   ],
+   "addModifier": [
+    "failed",
+    "Unsupported Blender command action: addModifier"
+   ],
+   "addNode": [
+    "failed",
+    "Unsupported Blender command action: addNode"
+   ],
+   "setModifierInput": [
+    "failed",
+    "Unsupported Blender command action: setModifierInput"
+   ]
+  },
+  "no_primitive_choice": {
+   "createObject_MESH": "always primitive_cube_add; 'size' only",
+   "repro": "createObject objectType=MESH name=C -> verts=8"
+  },
+  "custom_property_does_not_drive_modifier": {
+   "receipt": "accepted",
+   "verts_before": 5,
+   "verts_after": 5,
+   "identifier": "Socket_1",
+   "snapshot_modifier": [
+    {
+     "name": "GN",
+     "type": "NODES",
+     "showViewport": true,
+     "showRender": true
+    }
+   ],
+   "snapshot_mesh": {
+    "vertexCount": 0,
+    "edgeCount": 0,
+    "polygonCount": 0,
+    "uvLayerCount": 0,
+    "shapeKeyCount": 0
+   },
+   "repro": "setObjectCustomProperty on a GN host object -> accepted, evaluated vertex count unchanged; snapshot reports base mesh counts and no modifier inputs"
+  },
+  "no_field_evaluation": {
+   "repro": "no action takes an expression/field; boundary_step's per-element rule must be computed by the caller and sent as N setObjectTransform"
+  },
+  "snapshot_not_evaluated": {
+   "brokkr_sees": {
+    "vertexCount": 0,
+    "edgeCount": 0,
+    "polygonCount": 0,
+    "uvLayerCount": 0,
+    "shapeKeyCount": 0
+   },
+   "modifiers": [
+    {
+     "name": "GN",
+     "type": "NODES",
+     "showViewport": true,
+     "showRender": true
+    }
+   ],
+   "evaluated_instances": 38,
+   "repro": "host object with Distribute->InstanceOnPoints: snapshot mesh.vertexCount=0, no instance count, no positions"
+  },
+  "no_seed_parity": {
+   "repro": "Distribute Points on Faces seed=7 density=4 on a 3x3 grid: positions are Blender's hash; only reading them back (not offered) reproduces them"
+  }
+ }
+}

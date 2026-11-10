@@ -259,7 +259,28 @@ class RealServerTests(unittest.TestCase):
         self.assertEqual(server._handle_connection_message(message, {})[0]["schemaVersion"], "cultnet.error.v0")
         message[sg.TOKEN_FIELD] = self.target.session_token
         response = server._handle_connection_message(message, {})
-        self.assertIn("malformed", response[0].get("code", ""))  # past the guard, refused by the store as an empty put
+        # Past the guard: the store refuses the empty put and says so with a code. The guard's own
+        # refusal is codeless and names the token field, so either is told apart from the other
+        # without pinning the store's spelling of "an empty put is invalid".
+        self.assertTrue(response[0].get("code"))
+        self.assertNotIn(sg.TOKEN_FIELD, str(response[0]))
+
+    def test_a_peer_put_is_accepted_over_tcp_because_the_target_grants_peer_writes(self):
+        status = self.start()
+        cultmesh, _ = bt._load_cultmesh(PACKAGES)
+        import cultnet_py
+        document = self.target._documents["command_intent"]
+        client = cultmesh.CultMesh.create_client("127.0.0.1", status["port"], timeout_seconds=3.0)
+        with client.subscribe_database(subscription_id="peer", schema_ids=[bt.COMMAND_INTENT_SCHEMA],
+                                       include_snapshot=False) as subscription:
+            subscription.send(cultnet_py.document_put_raw(
+                message_id="peer-put", key="blender/commands/peer", schema_id=document.catalog_entry().schema_id,
+                stored_at="2026-11-07T00:00:00Z",
+                payload=document.encode_payload({
+                    "schema": bt.COMMAND_INTENT_SCHEMA, "commandId": "peer", "action": "createObject"}),
+            ))
+            change = subscription.read_next_change()  # a refusal would raise CultNetPeerError instead
+        self.assertEqual(change.record_key, "blender/commands/peer")
 
     def queue_intent(self, key="blender/commands/q1"):
         node, documents = self.target._open_node(self.cache, PACKAGES)
