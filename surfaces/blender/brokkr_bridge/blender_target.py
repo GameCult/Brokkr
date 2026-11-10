@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import node_actions as na
 from . import scene_actions as sa
 from .server_guard import BindRefused, SessionGuard, check_bind, guarded_server_class, is_loopback_host, purge_command_intents
 
@@ -32,6 +33,8 @@ SYNC_VAR_SCHEMA = "brokkr.sync.var.v0"
 SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
 SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
 
+EVALUATED_POSITION_CAP = 256
+
 CAPABILITIES = (
     "cultcache.mirror.publish",
     "cultcache.intent.watch",
@@ -50,6 +53,8 @@ CAPABILITIES = (
     "light.write",
     "world.write",
     "render.still",
+    "nodegraph.geometry.write",
+    "geometry.evaluated.read",
     "command.receipt.publish",
 )
 
@@ -73,6 +78,7 @@ class BrokkrBlenderTarget:
         self._debug_mirror_root: str = ""
         self.import_dir: str = ""
         self.output_dir: str = ""
+        self.nodes = na.NodeActions(bpy_module)
 
     def configure_action_dirs(self, import_dir: str, output_dir: str) -> None:
         """The directories importGltf and renderStill may touch; empty leaves that action disabled."""
@@ -490,6 +496,9 @@ class BrokkrBlenderTarget:
                 return self._set_world(context, command)
             if action == "renderStill":
                 return self._render_still(context, command)
+            if action in na.NodeActions.ACTIONS:
+                message, name = self.nodes.execute(action, command)
+                return self._receipt(command, "accepted", message, name)
             return self._receipt(command, "failed", f"Unsupported Blender command action: {action}", "")
         except sa.ActionRefused as error:
             return self._receipt(command, "failed", str(error), "")
@@ -566,6 +575,10 @@ class BrokkrBlenderTarget:
         property_name = command.get("propertyName") or "brokkrValue"
         if property_name.startswith("customProperties."):
             property_name = property_name[len("customProperties."):]
+        modifier_name = na.drives_modifier_input(obj, property_name)
+        if modifier_name:
+            return self._receipt(command, "failed", f"{property_name!r} is an input of Geometry Nodes modifier {modifier_name!r}; "
+                                 "a custom property does not drive it, use setModifierInput.", obj.name)
         obj[property_name] = command.get("value")
         return self._receipt(command, "accepted", "Blender custom property updated.", obj.name)
 
@@ -773,6 +786,7 @@ class BrokkrBlenderTarget:
             "constraints": [constraint.name for constraint in obj.constraints],
             "camera": self._camera_snapshot(data) if obj.type == "CAMERA" and data else None,
             "mesh": self._mesh_snapshot(data) if obj.type == "MESH" and data else None,
+            "evaluated": self._evaluated_snapshot(obj),
             "customProperties": self._custom_properties(obj.items()),
         }
 
@@ -792,6 +806,33 @@ class BrokkrBlenderTarget:
             "polygonCount": len(mesh.polygons),
             "uvLayerCount": len(mesh.uv_layers),
             "shapeKeyCount": len(mesh.shape_keys.key_blocks) if mesh.shape_keys else 0,
+        }
+
+    def _evaluated_snapshot(self, obj: Any) -> dict[str, Any] | None:
+        """What the modifier stack produced, for objects that have one: counts, bounds, and positions up to a cap.
+        A Geometry Nodes object's own mesh is empty, so the base mesh counts say nothing about it."""
+        if obj.type != "MESH" or not len(obj.modifiers):
+            return None
+        depsgraph = self.bpy.context.evaluated_depsgraph_get()
+        depsgraph.update()
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        try:
+            vertices = [tuple(round(c, 5) for c in v.co) for v in mesh.vertices]
+            counts = {"vertexCount": len(vertices), "edgeCount": len(mesh.edges), "polygonCount": len(mesh.polygons)}
+        finally:
+            evaluated.to_mesh_clear()
+        instances = [tuple(round(c, 5) for c in i.matrix_world.translation) for i in depsgraph.object_instances
+                     if i.is_instance and i.parent is not None and i.parent.original == obj]
+        cloud = vertices + instances
+        return {
+            **counts,
+            "instanceCount": len(instances),
+            "boundsMin": [min(p[axis] for p in cloud) for axis in range(3)] if cloud else [],
+            "boundsMax": [max(p[axis] for p in cloud) for axis in range(3)] if cloud else [],
+            "vertexLocations": [list(p) for p in vertices[:EVALUATED_POSITION_CAP]],
+            "instanceLocations": [list(p) for p in instances[:EVALUATED_POSITION_CAP]],
+            "truncated": len(vertices) > EVALUATED_POSITION_CAP or len(instances) > EVALUATED_POSITION_CAP,
         }
 
     def _modifier_snapshot(self, modifier: Any) -> dict[str, Any]:

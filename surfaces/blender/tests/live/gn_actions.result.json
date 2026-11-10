@@ -1,0 +1,461 @@
+{
+ "blender": "5.2.3 LTS",
+ "checks": [
+  {
+   "name": "createNodeGroup Ring",
+   "ok": true,
+   "detail": "Created node group; interface identifiers: output Geometry=Socket_0"
+  },
+  {
+   "name": "addNode circle",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode cube",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode iop",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "linkSockets Ring",
+   "ok": true,
+   "detail": "Linked circle.Mesh -> iop.Points."
+  },
+  {
+   "name": "linkSockets Ring",
+   "ok": true,
+   "detail": "Linked cube.Mesh -> iop.Instance."
+  },
+  {
+   "name": "linkSockets Ring",
+   "ok": true,
+   "detail": "Linked iop.Instances -> gout.Socket_0."
+  },
+  {
+   "name": "createObject ",
+   "ok": true,
+   "detail": "Blender object created."
+  },
+  {
+   "name": "addModifier Ring",
+   "ok": true,
+   "detail": "Geometry Nodes modifier set."
+  },
+  {
+   "name": "ring instances equal native",
+   "ok": true,
+   "detail": {
+    "brokkr": [
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.41421,
+      1.41421,
+      0.0
+     ],
+     [
+      -0.0,
+      2.0,
+      0.0
+     ],
+     [
+      -1.41421,
+      1.41421,
+      0.0
+     ],
+     [
+      -2.0,
+      -0.0,
+      0.0
+     ],
+     [
+      -1.41421,
+      -1.41421,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ],
+     [
+      1.41421,
+      -1.41421,
+      0.0
+     ]
+    ],
+    "native": [
+     [
+      -2.0,
+      -0.0,
+      0.0
+     ],
+     [
+      -1.41421,
+      -1.41421,
+      0.0
+     ],
+     [
+      -1.41421,
+      1.41421,
+      0.0
+     ],
+     [
+      0.0,
+      -2.0,
+      0.0
+     ],
+     [
+      -0.0,
+      2.0,
+      0.0
+     ],
+     [
+      1.41421,
+      -1.41421,
+      0.0
+     ],
+     [
+      1.41421,
+      1.41421,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "createNodeGroup RingN",
+   "ok": true,
+   "detail": "Created node group; interface identifiers: output Geometry=Socket_0, input Count=Socket_1"
+  },
+  {
+   "name": "addNode circle",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode cube",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode iop",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "linkSockets RingN",
+   "ok": true,
+   "detail": "Linked gin.Socket_1 -> circle.Vertices."
+  },
+  {
+   "name": "linkSockets RingN",
+   "ok": true,
+   "detail": "Linked circle.Mesh -> iop.Points."
+  },
+  {
+   "name": "linkSockets RingN",
+   "ok": true,
+   "detail": "Linked cube.Mesh -> iop.Instance."
+  },
+  {
+   "name": "linkSockets RingN",
+   "ok": true,
+   "detail": "Linked iop.Instances -> gout.Socket_0."
+  },
+  {
+   "name": "createObject ",
+   "ok": true,
+   "detail": "Blender object created."
+  },
+  {
+   "name": "addModifier RingN",
+   "ok": true,
+   "detail": "Geometry Nodes modifier set."
+  },
+  {
+   "name": "setModifierInput RingHost",
+   "ok": true,
+   "detail": "Modifier input Count set."
+  },
+  {
+   "name": "setModifierInput changes evaluated instances",
+   "ok": true,
+   "detail": [
+    8,
+    12
+   ]
+  },
+  {
+   "name": "custom property on a modifier input is refused",
+   "ok": true,
+   "detail": "'Count' is an input of Geometry Nodes modifier 'GN'; a custom property does not drive it, use setModifierInput."
+  },
+  {
+   "name": "refused custom property changed nothing",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "other custom properties still accepted",
+   "ok": true,
+   "detail": "Blender custom property updated."
+  },
+  {
+   "name": "createNodeGroup Boundary",
+   "ok": true,
+   "detail": "Created node group; interface identifiers: output Geometry=Socket_0"
+  },
+  {
+   "name": "addNode line",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode pos",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode len",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode gt",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode nrm",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode edge",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode set",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked pos.Position -> len.Vector."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked len.Value -> gt.A."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked pos.Position -> nrm.Vector."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked nrm.Vector -> edge.Vector."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked line.Mesh -> set.Geometry."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked gt.Result -> set.Selection."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked edge.Vector -> set.Position."
+  },
+  {
+   "name": "linkSockets Boundary",
+   "ok": true,
+   "detail": "Linked set.Geometry -> gout.Socket_0."
+  },
+  {
+   "name": "createObject ",
+   "ok": true,
+   "detail": "Blender object created."
+  },
+  {
+   "name": "addModifier Boundary",
+   "ok": true,
+   "detail": "Geometry Nodes modifier set."
+  },
+  {
+   "name": "boundary_step vertices equal native",
+   "ok": true,
+   "detail": {
+    "brokkr": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.5,
+      0.0,
+      0.0
+     ],
+     [
+      0.5,
+      0.0,
+      0.0
+     ]
+    ],
+    "native": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.5,
+      0.0,
+      0.0
+     ],
+     [
+      0.5,
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "createNodeGroup Scatter",
+   "ok": true,
+   "detail": "Created node group; interface identifiers: output Geometry=Socket_0, input Seed=Socket_1"
+  },
+  {
+   "name": "addNode grid",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode dist",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode cone",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode iop",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "linkSockets Scatter",
+   "ok": true,
+   "detail": "Linked grid.Mesh -> dist.Mesh."
+  },
+  {
+   "name": "linkSockets Scatter",
+   "ok": true,
+   "detail": "Linked dist.Points -> iop.Points."
+  },
+  {
+   "name": "linkSockets Scatter",
+   "ok": true,
+   "detail": "Linked cone.Mesh -> iop.Instance."
+  },
+  {
+   "name": "linkSockets Scatter",
+   "ok": true,
+   "detail": "Linked iop.Instances -> gout.Socket_0."
+  },
+  {
+   "name": "createObject ",
+   "ok": true,
+   "detail": "Blender object created."
+  },
+  {
+   "name": "addModifier Scatter",
+   "ok": true,
+   "detail": "Geometry Nodes modifier set."
+  },
+  {
+   "name": "scatter instances equal native",
+   "ok": true,
+   "detail": {
+    "brokkr": 38,
+    "native": 38
+   }
+  },
+  {
+   "name": "setModifierInput ScatterHost",
+   "ok": true,
+   "detail": "Modifier input Seed set."
+  },
+  {
+   "name": "unwired exposed input leaves result",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "unknown input refused",
+   "ok": true,
+   "detail": "input 'Nope': socket 'Nope' was not found."
+  },
+  {
+   "name": "refused addNode left no node",
+   "ok": true,
+   "detail": null
+  },
+  {
+   "name": "unknown property refused",
+   "ok": true,
+   "detail": "GeometryNodeMeshCube has no settable property 'nope'."
+  },
+  {
+   "name": "file-reading node refused",
+   "ok": true,
+   "detail": "node type GeometryNodeImportOBJ is not allowed in this cut (Import)."
+  },
+  {
+   "name": "unknown node type refused",
+   "ok": true,
+   "detail": "Blender does not offer node type GeometryNodeNoSuchThing: Error: Node type GeometryNodeNoSuchThing undefined\n"
+  },
+  {
+   "name": "invalid link refused and removed",
+   "ok": true,
+   "detail": "Link Mesh -> Density is not valid (type or field/single-value mismatch)."
+  },
+  {
+   "name": "wrong value type refused",
+   "ok": true,
+   "detail": "input 'Seed' must be a finite number within +-1e+09."
+  },
+  {
+   "name": "duplicate id refused",
+   "ok": true,
+   "detail": "Node id 'grid' already exists in 'Scatter'."
+  }
+ ]
+}
