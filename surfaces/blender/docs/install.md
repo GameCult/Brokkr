@@ -116,6 +116,10 @@ Admitted command actions:
 Scene action fields (all other keys are ignored; a refused intent changes nothing and
 gets a `failed` receipt whose message names the rule):
 
+- `createObject`: optional `objectType` (`MESH`, `LIGHT`, `CAMERA`, `EMPTY`; default `EMPTY`),
+  `name`, `location`. Any other `objectType` (for example `TEXT` or `CURVE`) is refused with
+  the allowed set named. A `MESH` is a cube (`size`); a `meshType` other than `CUBE`
+  (case-insensitive) is refused rather than ignored.
 - `importGltf`: `filepath`, `.gltf` or `.glb`, relative to the add-on preference
   `Import Directory` (absolute paths, `..` and symlinks that resolve outside it are
   refused). Empty `Import Directory` disables the action. Needs Blender's glTF add-on.

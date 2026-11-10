@@ -34,6 +34,8 @@ SYNC_VAR_SCHEMA = "brokkr.sync.var.v0"
 SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
 SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
 
+CREATABLE_OBJECT_TYPES = ("MESH", "LIGHT", "CAMERA", "EMPTY")
+
 EVALUATED_POSITION_CAP = 256
 EVALUATED_VERTEX_LIMIT = 1_000_000
 EVALUATED_INSTANCE_SCAN_LIMIT = 100_000  # depsgraph items visited per capture; iterating one in Python costs ~5 us
@@ -518,6 +520,14 @@ class BrokkrBlenderTarget:
 
     def _create_object(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         object_type = command.get("objectType", "EMPTY")
+        if not isinstance(object_type, str) or object_type not in CREATABLE_OBJECT_TYPES:
+            shown = object_type if isinstance(object_type, str) else repr(object_type)
+            raise sa.ActionRefused(
+                f"objectType {shown!r} cannot be created; allowed: {', '.join(CREATABLE_OBJECT_TYPES)}.")
+        mesh_type = command.get("meshType")
+        if object_type == "MESH" and mesh_type is not None and (
+                not isinstance(mesh_type, str) or mesh_type.upper() != "CUBE"):
+            raise sa.ActionRefused(f"meshType {mesh_type!r} is not available; a MESH is a CUBE.")
         name = command.get("name") or f"Brokkr {object_type.title()}"
         location = _vector(command.get("location"), 3, (0.0, 0.0, 0.0))
 
@@ -527,7 +537,7 @@ class BrokkrBlenderTarget:
             self.bpy.ops.object.light_add(type=command.get("lightType", "POINT"), location=location)
         elif object_type == "CAMERA":
             self.bpy.ops.object.camera_add(location=location)
-        else:
+        else:  # EMPTY
             self.bpy.ops.object.empty_add(type=command.get("emptyDisplayType", "PLAIN_AXES"), location=location)
 
         obj = context.object

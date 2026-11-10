@@ -86,7 +86,19 @@ class FakeBpy:
             worlds=NS(get=lambda name: None, new=self.new_world),
         )
         self.path = NS(abspath=lambda p: p)
-        self.ops = NS(import_scene=NS(gltf=self.import_gltf), render=NS(render=self.render_still))
+        self.created = []
+        self.app = NS(background=False)
+        add = lambda kind: (lambda **kw: self.add_object(kind, kw))
+        self.ops = NS(import_scene=NS(gltf=self.import_gltf), render=NS(render=self.render_still),
+                      mesh=NS(primitive_cube_add=add("MESH")), object=NS(light_add=add("LIGHT"),
+                      camera_add=add("CAMERA"), empty_add=add("EMPTY")))
+        self.on_add = lambda obj: None
+
+    def add_object(self, kind, kwargs):
+        self.created.append((kind, kwargs))
+        obj = NS(name=kind.title(), type=kind)
+        self.data.objects[obj.name] = obj
+        self.on_add(obj)
 
     def new_world(self, name):
         background = NS(inputs={"Color": NS(default_value=None), "Strength": NS(default_value=None)})
@@ -117,7 +129,8 @@ class ActionTests(unittest.TestCase):
         self.bpy = FakeBpy()
         self.target = bt.BrokkrBlenderTarget(self.bpy)
         self.target.configure_action_dirs(str(self.root / "in"), str(self.root / "out"))
-        self.context = NS(scene=self.bpy.scene)
+        self.context = NS(scene=self.bpy.scene, object=None)
+        self.bpy.on_add = lambda obj: setattr(self.context, "object", obj)
 
     def run_action(self, **command):
         command.setdefault("commandId", "c1")
@@ -237,6 +250,30 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(self.bpy.rendered, [])
         self.target.configure_action_dirs(str(self.root / "in"), "")
         self.assertEqual(self.run_action(action="renderStill", outputPath="a.png")["status"], "failed")
+
+    # createObject
+    def test_create_object_makes_the_four_admitted_types(self):
+        for kind in ("MESH", "LIGHT", "CAMERA", "EMPTY"):
+            receipt = self.run_action(action="createObject", objectType=kind, name="N")
+            self.assertEqual(receipt["status"], "accepted", kind)
+            self.assertEqual(self.bpy.created[-1][0], kind)
+        self.assertEqual(self.run_action(action="createObject", objectType="MESH", meshType="cube")["status"], "accepted")
+
+    def test_create_object_refuses_other_types_naming_the_type_and_the_allowed_set(self):
+        for kind in ("TEXT", "CURVE", "mesh", "", None, 3):
+            receipt = self.run_action(action="createObject", objectType=kind)
+            self.assertEqual(receipt["status"], "failed", kind)
+            for allowed in ("MESH", "LIGHT", "CAMERA", "EMPTY"):
+                self.assertIn(allowed, receipt["message"])
+            self.assertIn(repr(kind) if not isinstance(kind, str) else kind, receipt["message"])
+        self.assertEqual(self.bpy.created, [])
+
+    def test_create_object_refuses_a_mesh_type_other_than_cube(self):
+        for mesh_type in ("CYLINDER", "", 1):
+            receipt = self.run_action(action="createObject", objectType="MESH", meshType=mesh_type)
+            self.assertEqual(receipt["status"], "failed", mesh_type)
+            self.assertIn("CUBE", receipt["message"])
+        self.assertEqual(self.bpy.created, [])
 
     # importGltf: names
     def test_import_refuses_drive_unc_extended_stream_and_device_names(self):
