@@ -132,7 +132,7 @@ class ActionTests(unittest.TestCase):
         self.bpy = FakeBpy()
         self.target = bt.BrokkrBlenderTarget(self.bpy)
         self.target.configure_action_dirs(str(self.root / "in"), str(self.root / "out"))
-        self.context = NS(scene=self.bpy.scene)
+        self.context = NS(scene=self.bpy.scene, view_layer=NS(objects=Objects(dict(self.bpy.data.objects.items()))))
 
     def run_action(self, **command):
         command.setdefault("commandId", "c1")
@@ -248,6 +248,31 @@ class ActionTests(unittest.TestCase):
         self.assertTrue(call["use_selection"])
         self.assertEqual(call["selected_at_call"], ["Cam", "Lamp"])
         self.assertEqual([o.name for o in self.bpy.data.objects.values() if o.selected], ["Cube"])
+
+    def test_export_without_a_selection_never_touches_selection(self):
+        def explode(*a, **k):
+            raise AssertionError("selection touched")
+        for o in self.bpy.data.objects.values():
+            o.select_set = explode
+            o.select_get = explode
+        receipt = self.run_action(action="exportGltf", filepath="a.glb")
+        self.assertEqual(receipt["status"], "accepted", receipt)
+        self.assertFalse(self.bpy.exported[0]["use_selection"])
+
+    def test_export_selection_ignores_objects_outside_the_view_layer_and_refuses_naming_one(self):
+        def not_in_layer(state):
+            raise RuntimeError("Object can't be selected because it is not in View Layer")
+        other = NS(name="Other", type="MESH", data=None, selected=False, select_get=lambda: False, select_set=not_in_layer)
+        self.bpy.data.objects["Other"] = other
+        ok = self.run_action(action="exportGltf", filepath="a.glb", selection=["Cam"])
+        self.assertEqual(ok["status"], "accepted", ok)
+        self.assertEqual(self.bpy.exported[0]["selected_at_call"], ["Cam"])
+        refused = self.run_action(action="exportGltf", filepath="b.glb", selection=["Cam", "Other"])
+        self.assertEqual(refused["status"], "failed")
+        self.assertIn("Other", refused["message"])
+        self.assertIn("view layer", refused["message"])
+        self.assertEqual(len(self.bpy.exported), 1)
+        self.assertFalse((self.root / "out" / "b.glb").exists())
 
     def test_export_selection_restored_when_the_exporter_raises(self):
         def boom(**kw):

@@ -125,7 +125,10 @@ gets a `failed` receipt whose message names the rule):
   existing name, or an existing `.bin` beside a `.gltf`, is refused; there is no overwrite).
   Optional `extras` (custom properties become node `extras`), `yUp`, `applyModifiers`
   (each true by default, must be a boolean) and `selection` (a non-empty list of object
-  names; any name not found refuses the export; the selection is restored afterwards).
+  names; any name not found, or not in the active view layer, refuses the export; the
+  selection is touched only when one is given, and restored afterwards). Not checked: texture
+  files a `.gltf` export writes beside it (only the `.bin` is), and a link or swap made between the
+  check and the write (the same residual as renderStill).
   The receipt message carries the written path and byte size. Needs Blender's glTF add-on.
 - `setCamera`: `targetObjectName` (a camera object); optional `lens` (mm),
   `cameraType` (`PERSP`, `ORTHO`, `PANO`), `panoramaType` (for example

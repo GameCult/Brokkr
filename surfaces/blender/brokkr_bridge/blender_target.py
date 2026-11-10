@@ -673,6 +673,11 @@ class BrokkrBlenderTarget:
             if missing:
                 raise sa.ActionRefused(f"Selection object was not found: {missing[0]}")
             chosen = [self.bpy.data.objects[n] for n in dict.fromkeys(names)]
+            # select_set raises for an object with no base in the view layer (another scene, an
+            # orphan, an excluded collection), and use_selection exports only selected layer objects.
+            off_layer = [o.name for o in chosen if o.name not in context.view_layer.objects]
+            if off_layer:
+                raise sa.ActionRefused(f"Selection object is not in the active view layer: {off_layer[0]}")
         binary = path.with_suffix(".bin")
         if suffix == ".gltf" and os.path.lexists(binary):
             raise sa.ActionRefused("output path already exists; output actions never overwrite: " + binary.name)
@@ -680,12 +685,12 @@ class BrokkrBlenderTarget:
         # Re-check after the folders exist and just before use (residual TOCTOU as in renderStill).
         if sa.resolve_inside(self.output_dir, name, "output", new_file=True) != path:
             raise sa.ActionRefused("Output path changed while it was being checked.")
-        objects = list(self.bpy.data.objects.values())
+        # The selection is touched only when one was asked for, and only on view-layer objects.
+        objects = list(context.view_layer.objects.values()) if chosen else []
         saved = [(obj, obj.select_get()) for obj in objects]
         try:
-            if chosen:
-                for obj in objects:
-                    obj.select_set(obj in chosen)
+            for obj in objects:
+                obj.select_set(obj in chosen)
             result = self.bpy.ops.export_scene.gltf(
                 filepath=str(path), export_format="GLB" if suffix == ".glb" else "GLTF_SEPARATE",
                 use_selection=bool(chosen), **options)
