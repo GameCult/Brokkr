@@ -13,16 +13,17 @@ from typing import Any
 
 from .scene_actions import ActionRefused
 
-ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,63}$")
-KEY_PATTERN = re.compile(r"^[A-Za-z0-9 ._-]{1,63}$")
+ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,63}")
+KEY_PATTERN = re.compile(r"[A-Za-z0-9 ._-]{1,63}")
 # A geometry tree may hold geometry, function and shader math nodes. Nodes that read or write files,
 # run code, write caches or nest groups are not part of this cut.
-NODE_IDNAME = re.compile(r"^(GeometryNode|FunctionNode|ShaderNode)[A-Za-z0-9]+$")
+NODE_IDNAME = re.compile(r"(GeometryNode|FunctionNode|ShaderNode)[A-Za-z0-9]+")
 NODE_DENIED = ("Import", "Export", "Script", "Bake", "Group", "Simulation", "Repeat", "Foreach", "Viewer", "TexImage", "TexEnvironment")
 MAX_NODES = 500
 MAX_INTERFACE = 64
 MAX_MODIFIERS = 8
 MAX_VALUE = 1.0e9
+MAX_INT = 4096  # counts, levels and sizes multiply: a 4096 x 4096 grid is the ceiling
 SOCKET_TYPES = {"Geometry": "NodeSocketGeometry", "Float": "NodeSocketFloat", "Int": "NodeSocketInt",
                 "Bool": "NodeSocketBool", "Vector": "NodeSocketVector"}
 IN_OUT = {"INPUT", "OUTPUT"}
@@ -41,7 +42,7 @@ def text(command: dict[str, Any], key: str, pattern: re.Pattern, label: str, *, 
         if required:
             raise ActionRefused(f"{label} is required.")
         return ""
-    if not isinstance(value, str) or not pattern.match(value):
+    if not isinstance(value, str) or not pattern.fullmatch(value):
         raise ActionRefused(f"{label} must be 1..63 characters of letters, digits, '.', '_' or '-'.")
     return value
 
@@ -65,8 +66,8 @@ def typed_value(value: Any, kind: str, label: str) -> Any:
         return finite(value, label)
     if kind in ("INT", "Int"):
         number = finite(value, label)
-        if number != int(number):
-            raise ActionRefused(f"{label} must be a whole number.")
+        if number != int(number) or abs(number) > MAX_INT:
+            raise ActionRefused(f"{label} must be a whole number within +-{MAX_INT}.")
         return int(number)
     if kind in ("BOOLEAN", "Bool"):
         if not isinstance(value, bool):
@@ -81,7 +82,7 @@ def typed_value(value: Any, kind: str, label: str) -> Any:
 
 
 def check_idname(idname: Any) -> str:
-    if not isinstance(idname, str) or not NODE_IDNAME.match(idname):
+    if not isinstance(idname, str) or not NODE_IDNAME.fullmatch(idname):
         raise ActionRefused("blIdname must be a GeometryNode*, FunctionNode* or ShaderNode* type.")
     for denied in NODE_DENIED:
         if denied in idname:
@@ -233,9 +234,12 @@ class NodeActions:
         target = self._node(tree, text(command, "toNode", ID_PATTERN, "toNode"))
         out = self._socket(source.outputs, str(command.get("fromSocket", "")), "fromSocket")
         into = self._socket(target.inputs, str(command.get("toSocket", "")), "toSocket")
-        link = tree.links.new(out, into)
+        displaced = [l.from_socket for l in tree.links if l.to_socket == into] if not getattr(into, "is_multi_input", False) else []
+        link = tree.links.new(out, into)  # replaces whatever single link the input had
         if not link.is_valid:
             tree.links.remove(link)
+            for old in displaced:
+                tree.links.new(old, into)
             raise ActionRefused(f"Link {out.name} -> {into.name} is not valid (type or field/single-value mismatch).")
         return f"Linked {source.get('brokkr_id')}.{out.identifier} -> {target.get('brokkr_id')}.{into.identifier}.", tree.name
 
@@ -260,6 +264,8 @@ class NodeActions:
             if len(obj.modifiers) >= MAX_MODIFIERS:
                 raise ActionRefused(f"{obj.name!r} already has {MAX_MODIFIERS} modifiers.")
             modifier = obj.modifiers.new(name, "NODES")
+            if modifier is None:
+                raise ActionRefused(f"{obj.name!r} is a {obj.type} object; it cannot take a Geometry Nodes modifier.")
         modifier.node_group = tree
         obj.update_tag()
         return "Geometry Nodes modifier set.", obj.name
@@ -290,10 +296,12 @@ def modifier_input(tree: Any, key: str) -> Any:
 
 
 def drives_modifier_input(obj: Any, property_name: str) -> str:
-    """The modifier whose group has an interface input called property_name (identifier or name), else ''."""
+    """The modifier whose group has an interface input with identifier property_name (Socket_N), else ''.
+    An object custom property never drives a modifier input, so only the modifier's own identifiers are
+    refused; a property that merely shares an input's display name is an ordinary custom property."""
     for modifier in obj.modifiers:
         if modifier.type == "NODES" and modifier.node_group is not None:
             for item in modifier.node_group.interface.items_tree:
-                if item.item_type == "SOCKET" and item.in_out == "INPUT" and property_name in (item.identifier, item.name):
+                if item.item_type == "SOCKET" and item.in_out == "INPUT" and property_name == item.identifier:
                     return modifier.name
     return ""

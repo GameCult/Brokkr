@@ -93,11 +93,11 @@ before = evaluated(t, "RingHost")["instanceCount"]
 ok(t, action="setModifierInput", objectName="RingHost", modifierName="GN", socket="Count", value=12)
 after = evaluated(t, "RingHost")["instanceCount"]
 check("setModifierInput changes evaluated instances", (before, after) == (8, 12), (before, after))
-r = act(t, action="setObjectCustomProperty", targetObjectName="RingHost", propertyName="Count", value=3)
-check("custom property on a modifier input is refused", r["status"] == "failed" and "setModifierInput" in r["message"], r["message"])
+r = act(t, action="setObjectCustomProperty", targetObjectName="RingHost", propertyName="Socket_1", value=3)
+check("custom property naming a modifier input identifier is refused", r["status"] == "failed" and "setModifierInput" in r["message"], r["message"])
 check("refused custom property changed nothing", evaluated(t, "RingHost")["instanceCount"] == 12)
-r = act(t, action="setObjectCustomProperty", targetObjectName="RingHost", propertyName="tag", value=3)
-check("other custom properties still accepted", r["status"] == "accepted", r["message"])
+r = act(t, action="setObjectCustomProperty", targetObjectName="RingHost", propertyName="Count", value=3)
+check("a custom property sharing only a display name is ordinary", r["status"] == "accepted", r["message"])
 
 # ---- 2. boundary step
 B = 0.5
@@ -157,6 +157,33 @@ r = act(t, action="addNode", treeKey="Scatter", id="bad4", blIdname="GeometryNod
 r = act(t, action="linkSockets", treeKey="Scatter", fromNode="cone", fromSocket="Mesh", toNode="dist", toSocket="Density"); check("invalid link refused and removed", r["status"] == "failed" and not any(l.to_socket.name == "Density" for l in bpy.data.node_groups["Scatter"].links), r["message"])
 r = act(t, action="setModifierInput", objectName="ScatterHost", modifierName="GN", socket="Seed", value="x"); check("wrong value type refused", r["status"] == "failed", r["message"])
 r = act(t, action="addNode", treeKey="Scatter", id="grid", blIdname="GeometryNodeMeshCube"); check("duplicate id refused", r["status"] == "failed", r["message"])
+
+t2 = fresh()
+graph(t2, "L", GEO_OUT, [dict(id="cube", blIdname="GeometryNodeMeshCube"), dict(id="m", blIdname="ShaderNodeMath"), dict(id="iop", blIdname="GeometryNodeInstanceOnPoints")],
+      [("cube", "Mesh", "iop", "Points")])
+before = [(l.from_node.get("brokkr_id"), l.to_socket.identifier) for l in bpy.data.node_groups["L"].links if l.to_node.get("brokkr_id") == "iop"]
+r = act(t2, action="linkSockets", treeKey="L", fromNode="m", fromSocket="Value", toNode="iop", toSocket="Points")
+after = [(l.from_node.get("brokkr_id"), l.to_socket.identifier) for l in bpy.data.node_groups["L"].links if l.to_node.get("brokkr_id") == "iop"]
+check("refused link keeps the link it would have replaced", r["status"] == "failed" and before == after == [("cube", "Points")], (r["message"], before, after))
+ok(t2, action="createObject", objectType="CAMERA", name="Cam")
+r = act(t2, action="addModifier", objectName="Cam", treeKey="L"); check("modifier on a camera refused clearly", r["status"] == "failed" and "CAMERA" in r["message"], r["message"])
+r = act(t2, action="addNode", treeKey="L", id="n\n", blIdname="ShaderNodeMath"); check("trailing newline in an id refused", r["status"] == "failed", r["message"])
+# off-origin host: vertices are local, instances world, bounds kept apart
+t3 = fresh()
+graph(t3, "Off", GEO_OUT, [dict(id="circle", blIdname="GeometryNodeMeshCircle", inputs={"Vertices": 4, "Radius": 1.0}), dict(id="cube", blIdname="GeometryNodeMeshCube"), dict(id="iop", blIdname="GeometryNodeInstanceOnPoints"), dict(id="join", blIdname="GeometryNodeJoinGeometry")],
+      [("circle", "Mesh", "iop", "Points"), ("cube", "Mesh", "iop", "Instance"), ("iop", "Instances", "join", "Geometry"), ("circle", "Mesh", "join", "Geometry"), ("join", "Geometry", "gout", "Geometry")])
+ok(t3, action="createObject", objectType="MESH", name="OffHost", location=[100, 0, 0]); ok(t3, action="addModifier", objectName="OffHost", modifierName="GN", treeKey="Off")
+ev = evaluated(t3, "OffHost")
+check("local vertex bounds and world instance bounds are separate", max(ev["vertexBoundsMax"]) <= 1.01 and ev["instanceBoundsMin"][0] >= 98.9 and ev["instanceCount"] == 4, ev)
+# non-finite positions are flagged
+ok(t3, action="createNodeGroup", treeKey="Inf", interface=GEO_OUT)
+for i in range(6): ok(t3, action="addNode", treeKey="Inf", id="s%d" % i, blIdname="ShaderNodeVectorMath", properties={"operation": "SCALE"}, inputs={"Scale": 1e9, "Vector": [1, 1, 1]}) if i == 0 else ok(t3, action="addNode", treeKey="Inf", id="s%d" % i, blIdname="ShaderNodeVectorMath", properties={"operation": "SCALE"}, inputs={"Scale": 1e9})
+ok(t3, action="addNode", treeKey="Inf", id="cube", blIdname="GeometryNodeMeshCube"); ok(t3, action="addNode", treeKey="Inf", id="set", blIdname="GeometryNodeSetPosition")
+for i in range(1, 6): ok(t3, action="linkSockets", treeKey="Inf", fromNode="s%d" % (i - 1), fromSocket="Vector", toNode="s%d" % i, toSocket="Vector")
+ok(t3, action="linkSockets", treeKey="Inf", fromNode="cube", fromSocket="Mesh", toNode="set", toSocket="Geometry"); ok(t3, action="linkSockets", treeKey="Inf", fromNode="s5", fromSocket="Vector", toNode="set", toSocket="Position"); ok(t3, action="linkSockets", treeKey="Inf", fromNode="set", fromSocket="Geometry", toNode="gout", toSocket="Geometry")
+ok(t3, action="createObject", objectType="MESH", name="InfHost"); ok(t3, action="addModifier", objectName="InfHost", treeKey="Inf")
+ev = evaluated(t3, "InfHost")
+check("non-finite evaluated positions are flagged and not published", ev["nonFinite"] and ev["vertexLocations"] == [] and json.dumps(ev, allow_nan=False), ev)
 
 json.dump(R, open(out, "w"), indent=1, default=str)
 bad = [c for c in R["checks"] if not c["ok"]]

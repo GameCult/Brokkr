@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ADDON = Path(__file__).resolve().parents[1] / "brokkr_bridge"
@@ -64,7 +65,9 @@ class Links(list):
         self.valid = valid
 
     def new(self, a, b):
-        link = NS(from_socket=a, to_socket=b, is_valid=self.valid)
+        for old in [l for l in self if l.to_socket is b]:  # a single-link input loses its old link, as in Blender
+            list.remove(self, old)
+        link = NS(from_socket=a, to_socket=b, is_valid=self.valid(a, b) if callable(self.valid) else self.valid)
         self.append(link)
         return link
 
@@ -108,10 +111,14 @@ class Inputs:
 
 
 class Modifiers(list):
+    refuses = False
+
     def get(self, name):
         return next((m for m in self if m.name == name), None)
 
     def new(self, name, kind):
+        if self.refuses:
+            return None  # Blender returns None for object types without modifiers
         m = NS(name=name, type=kind, node_group=None, properties=NS(inputs=Inputs()))
         self.append(m)
         return m
@@ -301,14 +308,21 @@ class NodeActionTests(unittest.TestCase):
         self.assertEqual(host.modifiers[0].properties.inputs.Socket_1.value, 1.5)
 
     # setObjectCustomProperty on a Geometry Nodes host
-    def test_custom_property_naming_a_modifier_input_is_refused(self):
+    def test_custom_property_naming_a_modifier_input_identifier_is_refused(self):
         self.group()
         host = self.bpy.data.objects["Host"]
         self.accepted(action="addModifier", objectName="Host", modifierName="GN", treeKey="G")
-        for name in ("Count", "Socket_1", "customProperties.Count"):
+        for name in ("Socket_1", "customProperties.Socket_1"):
             receipt = self.refused(action="setObjectCustomProperty", targetObjectName="Host", propertyName=name, value=3)
             self.assertIn("setModifierInput", receipt["message"])
         self.assertFalse(hasattr(host, "custom"))
+
+    def test_custom_property_sharing_only_a_display_name_is_an_ordinary_property(self):
+        self.group()
+        host = self.bpy.data.objects["Host"]
+        self.accepted(action="addModifier", objectName="Host", modifierName="GN", treeKey="G")
+        self.accepted(action="setObjectCustomProperty", targetObjectName="Host", propertyName="Count", value=3)
+        self.assertEqual(host.custom, ("Count", 3))
 
     def test_other_custom_properties_on_the_same_object_still_work(self):
         self.group()
@@ -317,25 +331,97 @@ class NodeActionTests(unittest.TestCase):
         self.accepted(action="setObjectCustomProperty", targetObjectName="Host", propertyName="tag", value=3)
         self.assertEqual(host.custom, ("tag", 3))
 
+    # review fixes
+    def test_refused_link_restores_the_link_it_displaced(self):
+        tree = self.group()
+        self.accepted(action="addNode", treeKey="G", id="a", blIdname="ShaderNodeMath")
+        self.accepted(action="addNode", treeKey="G", id="b", blIdname="ShaderNodeMath")
+        self.accepted(action="addNode", treeKey="G", id="c", blIdname="ShaderNodeMath")
+        self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="c", toSocket="A")
+        tree.links.valid = lambda a, b: a is not tree.nodes[3].outputs[0]  # b.Out -> anything is invalid
+        self.refused(action="linkSockets", treeKey="G", fromNode="b", fromSocket="Out", toNode="c", toSocket="A")
+        self.assertEqual([(l.from_socket, l.to_socket) for l in tree.links], [(tree.nodes[2].outputs[0], tree.nodes[4].inputs[0])])
+
+    def test_ints_are_capped_and_patterns_reject_trailing_newlines(self):
+        self.group()
+        self.accepted(action="addNode", treeKey="G", id="ok", blIdname="ShaderNodeMath")
+        self.refused(action="addNode", treeKey="G", id="a\n", blIdname="ShaderNodeMath")
+        self.refused(action="createNodeGroup", treeKey="T\n", interface=[{"inOut": "INPUT", "name": "a", "type": "Int"}])
+        self.refused(action="createNodeGroup", treeKey="H", interface=[{"inOut": "INPUT", "name": "a", "type": "Int", "default": na.MAX_INT + 1}])
+        self.accepted(action="createNodeGroup", treeKey="H", interface=[{"inOut": "INPUT", "name": "a", "type": "Int", "default": na.MAX_INT}])
+
+    def test_modifier_on_an_object_type_without_modifiers_is_a_clear_refusal(self):
+        self.group()
+        host = self.bpy.data.objects["Host"]
+        host.modifiers.refuses = True
+        host.type = "CAMERA"
+        receipt = self.refused(action="addModifier", objectName="Host", treeKey="G")
+        self.assertIn("CAMERA", receipt["message"])
+
     # snapshot
-    def test_evaluated_snapshot_reports_counts_bounds_and_cap(self):
+    def snapshot_fixture(self, coords, instances):
         host = self.bpy.data.objects["Host"]
         host.modifiers.new("GN", "NODES")
-        verts = [NS(co=(float(i), 0.0, 0.0)) for i in range(3)]
-        mesh = NS(vertices=verts, edges=[1], polygons=[])
+
+        class Verts(list):
+            def foreach_get(self_inner, name, buffer):
+                flat = [c for v in self_inner for c in v.co]
+                buffer[:] = type(buffer)("f", flat)
+
+        mesh = NS(vertices=Verts(NS(co=c) for c in coords), edges=[1], polygons=[])
         evaluated = NS(to_mesh=lambda: mesh, to_mesh_clear=lambda: None)
         host.evaluated_get = lambda dg: evaluated
-        instances = [NS(is_instance=True, parent=NS(original=host), matrix_world=NS(translation=(0.0, 5.0 + i, 0.0))) for i in range(bt.EVALUATED_POSITION_CAP + 2)]
-        instances.append(NS(is_instance=True, parent=NS(original=Obj("other")), matrix_world=NS(translation=(9.0, 9.0, 9.0))))
-        instances.append(NS(is_instance=False, parent=None, matrix_world=NS(translation=(8.0, 8.0, 8.0))))
         self.bpy.context = NS(evaluated_depsgraph_get=lambda: NS(update=lambda: None, object_instances=instances))
-        data = self.target._evaluated_snapshot(host)
-        self.assertEqual((data["vertexCount"], data["edgeCount"], data["instanceCount"]), (3, 1, bt.EVALUATED_POSITION_CAP + 2))
-        self.assertEqual((data["boundsMin"], data["boundsMax"]), ([0.0, 0.0, 0.0], [2.0, 5.0 + bt.EVALUATED_POSITION_CAP + 1, 0.0]))
+        return host
+
+    @staticmethod
+    def instance(parent, point, is_instance=True):
+        return NS(is_instance=is_instance, parent=NS(original=parent) if parent else None, matrix_world=NS(translation=point))
+
+    def evaluated(self, host):
+        return self.target._evaluated_snapshot(host, self.target._instance_scan())
+
+    def test_evaluated_snapshot_reports_counts_separate_bounds_and_cap(self):
+        host = self.bpy.data.objects["Host"]
+        n = bt.EVALUATED_POSITION_CAP + 2
+        other = Obj("other")
+        instances = [self.instance(host, (0.0, 5.0 + i, 0.0)) for i in range(n)] + [self.instance(other, (9.0, 9.0, 9.0)), self.instance(None, (8.0, 8.0, 8.0), False)]
+        host = self.snapshot_fixture([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)], instances)
+        data = self.evaluated(host)
+        self.assertEqual((data["vertexCount"], data["edgeCount"], data["instanceCount"]), (3, 1, n))
+        self.assertEqual((data["vertexBoundsMin"], data["vertexBoundsMax"]), ([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]))
+        self.assertEqual((data["instanceBoundsMin"], data["instanceBoundsMax"]), ([0.0, 5.0, 0.0], [0.0, 5.0 + n - 1, 0.0]))
         self.assertEqual((len(data["instanceLocations"]), len(data["vertexLocations"]), data["truncated"]), (bt.EVALUATED_POSITION_CAP, 3, True))
+        self.assertFalse(data["nonFinite"])
+
+    def test_non_finite_positions_are_flagged_not_published(self):
+        host = self.snapshot_fixture([(0.0, 0.0, 0.0), (float("inf"), 0.0, 0.0)], [])
+        data = self.evaluated(host)
+        self.assertTrue(data["nonFinite"])
+        self.assertEqual((data["vertexLocations"], data["vertexBoundsMin"], data["vertexBoundsMax"]), ([], [], []))
+        host = self.snapshot_fixture([(0.0, 0.0, 0.0)], [self.instance(host, (float("nan"), 0.0, 0.0))])
+        data = self.evaluated(host)
+        self.assertTrue(data["nonFinite"] and data["instanceLocations"] == [] and data["instanceBoundsMin"] == [])
+
+    def test_a_huge_evaluated_mesh_reports_counts_only(self):
+        host = self.snapshot_fixture([(0.0, 0.0, 0.0)] * 3, [])
+        with unittest.mock.patch.object(bt, "EVALUATED_VERTEX_LIMIT", 2):
+            data = self.evaluated(host)
+        self.assertEqual((data["vertexCount"], data["positionsSkipped"], data["vertexLocations"], data["vertexBoundsMin"]), (3, True, [], []))
+
+    def test_per_object_snapshots_reuse_the_one_scan(self):
+        host = self.snapshot_fixture([(0.0, 0.0, 0.0)], [])
+        calls = []
+        get = self.bpy.context.evaluated_depsgraph_get
+        self.bpy.context.evaluated_depsgraph_get = lambda: calls.append(1) or get()
+        scan = self.target._instance_scan()
+        for _ in range(3):
+            self.target._evaluated_snapshot(host, scan)
+        self.assertEqual(len(calls), 1)
 
     def test_object_without_modifiers_has_no_evaluated_block(self):
-        self.assertIsNone(self.target._evaluated_snapshot(self.bpy.data.objects["Host"]))
+        self.assertIsNone(self.target._evaluated_snapshot(self.bpy.data.objects["Host"], None))
+        self.assertIsNone(self.target._evaluated_snapshot(self.bpy.data.objects["Host"], (None, {})))
 
 
 if __name__ == "__main__":
