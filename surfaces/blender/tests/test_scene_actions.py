@@ -275,6 +275,54 @@ class ActionTests(unittest.TestCase):
             self.assertIn("CUBE", receipt["message"])
         self.assertEqual(self.bpy.created, [])
 
+    # renderStill: GPU engines without a GL runtime
+    def test_render_still_refuses_gpu_engines_headless_when_the_gl_library_is_missing(self):
+        self.bpy.app.background = True
+        for engine in ("BLENDER_WORKBENCH", "BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "blender_workbench"):
+            self.bpy.scene.render.ENGINES = FakeRender.ENGINES + ("BLENDER_EEVEE_NEXT",)
+            with mock.patch.object(bt, "missing_gl_library", return_value="libEGL.so.1"):
+                receipt = self.run_action(action="renderStill", outputPath="a.png", engine=engine)
+            self.assertEqual(receipt["status"], "failed", engine)
+            self.assertIn("libEGL.so.1", receipt["message"])
+            self.assertIn("CYCLES", receipt["message"])
+        self.assertEqual(self.bpy.rendered, [])
+        self.assertEqual(self.bpy.scene.render.engine, "BLENDER_EEVEE")
+
+    def test_render_still_refuses_the_scene_engine_too_and_leaves_no_folder(self):
+        self.bpy.app.background = True  # scene engine is BLENDER_EEVEE
+        with mock.patch.object(bt, "missing_gl_library", return_value="libEGL.so.1"):
+            receipt = self.run_action(action="renderStill", outputPath="shots/a.png")
+        self.assertEqual(receipt["status"], "failed")
+        self.assertFalse((self.root / "out" / "shots").exists())
+
+    def test_render_still_gl_check_spares_cycles_foreground_and_a_present_library(self):
+        probe = mock.Mock(return_value="libEGL.so.1")
+        with mock.patch.object(bt, "missing_gl_library", probe):
+            self.bpy.app.background = True
+            self.assertEqual(self.run_action(action="renderStill", outputPath="a.png", engine="CYCLES")["status"], "accepted")
+            probe.assert_not_called()
+            self.bpy.app.background = False
+            self.assertEqual(self.run_action(action="renderStill", outputPath="b.png", engine="BLENDER_WORKBENCH")["status"], "accepted")
+            probe.assert_not_called()
+            self.bpy.app.background = True
+            probe.return_value = None
+            self.assertEqual(self.run_action(action="renderStill", outputPath="c.png", engine="BLENDER_WORKBENCH")["status"], "accepted")
+
+    def test_missing_gl_library_probes_only_on_linux_and_only_once(self):
+        bt.missing_gl_library.cache_clear()
+        with mock.patch.object(bt.sys, "platform", "win32"), mock.patch.object(bt.ctypes, "CDLL", side_effect=OSError) as cdll:
+            self.assertIsNone(bt.missing_gl_library())
+            cdll.assert_not_called()
+        bt.missing_gl_library.cache_clear()
+        with mock.patch.object(bt.sys, "platform", "linux"), mock.patch.object(bt.ctypes, "CDLL", side_effect=OSError) as cdll:
+            self.assertEqual(bt.missing_gl_library(), "libEGL.so.1")
+            self.assertEqual(bt.missing_gl_library(), "libEGL.so.1")
+            cdll.assert_called_once_with("libEGL.so.1")
+        bt.missing_gl_library.cache_clear()
+        with mock.patch.object(bt.sys, "platform", "linux"), mock.patch.object(bt.ctypes, "CDLL"):
+            self.assertIsNone(bt.missing_gl_library())
+        bt.missing_gl_library.cache_clear()
+
     # importGltf: names
     def test_import_refuses_drive_unc_extended_stream_and_device_names(self):
         for name in ("C:foo.glb", "C:\\x\\model.glb", "\\\\host\\share\\model.glb", "\\\\?\\C:\\model.glb",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import functools
 import json
 import math
 import os
@@ -35,6 +37,11 @@ SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
 SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
 
 CREATABLE_OBJECT_TYPES = ("MESH", "LIGHT", "CAMERA", "EMPTY")
+
+# Engines that draw through the GL stack. A headless Linux Blender without libEGL aborts the whole
+# process inside bpy.ops.render.render for these (no receipt); CYCLES renders on the CPU.
+GL_RENDER_ENGINES = ("BLENDER_WORKBENCH", "BLENDER_EEVEE", "BLENDER_EEVEE_NEXT")
+GL_RUNTIME_LIBRARY = "libEGL.so.1"
 
 EVALUATED_POSITION_CAP = 256
 EVALUATED_VERTEX_LIMIT = 1_000_000
@@ -751,6 +758,12 @@ class BrokkrBlenderTarget:
                     render.engine = engine
                 except TypeError:
                     raise sa.ActionRefused(f"engine {engine} is not available in this Blender.") from None
+            if render.engine in GL_RENDER_ENGINES and getattr(getattr(self.bpy, "app", None), "background", False):
+                missing = missing_gl_library()
+                if missing:
+                    raise sa.ActionRefused(
+                        f"engine {render.engine} needs {missing}, which this headless Blender cannot load "
+                        "(rendering would abort the process); use engine CYCLES.")
             if width is not None:
                 render.resolution_x = width
             if height is not None:
@@ -1031,6 +1044,19 @@ def _load_cultmesh(cultlib_py_src: str) -> tuple[Any, Any]:
             "to the CultLib packages directory or install cultcache-py, cultnet-py and cultmesh-py into Blender's Python."
         ) from exc
     return cultmesh_py, cultcache_py
+
+
+@functools.lru_cache(maxsize=None)
+def missing_gl_library() -> str | None:
+    """The GL runtime library this host cannot load, or None. Probed once, on Linux only: on
+    Windows and macOS a failed GPU render is not a headless-EGL abort."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        ctypes.CDLL(GL_RUNTIME_LIBRARY)
+    except OSError:
+        return GL_RUNTIME_LIBRARY
+    return None
 
 
 def _now() -> str:

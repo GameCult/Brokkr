@@ -137,7 +137,12 @@ gets a `failed` receipt whose message names the rule):
   `engine` (any engine of the running Blender, case-insensitive), `resolutionX`,
   `resolutionY` (whole numbers, 1 to 16384), `cameraName`. Engine, resolution,
   camera, file path and format are restored after the render. The render blocks
-  Blender's UI until it finishes.
+  Blender's UI until it finishes. In a background (`-b`) Blender on Linux, the GL
+  engines `BLENDER_WORKBENCH`, `BLENDER_EEVEE` and `BLENDER_EEVEE_NEXT` are refused
+  with a `failed` receipt when `libEGL.so.1` cannot be loaded (probed once), because
+  rendering would abort the whole process with no receipt; `CYCLES` renders on the
+  CPU. The check applies to the scene's engine when `engine` is omitted. No such
+  check runs on Windows or macOS.
 
 The scene actions were run against Blender 5.2.3 LTS headless with
 `surfaces/blender/tests/live/headless_smoke.py` (usage in its docstring). One real
