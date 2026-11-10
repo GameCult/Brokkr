@@ -43,7 +43,7 @@ def text(command: dict[str, Any], key: str, pattern: re.Pattern, label: str, *, 
             raise ActionRefused(f"{label} is required.")
         return ""
     if not isinstance(value, str) or not pattern.fullmatch(value):
-        raise ActionRefused(f"{label} must be 1..63 characters of letters, digits, '.', '_' or '-'.")
+        raise ActionRefused(f"{label} must be 1..63 characters of letters, digits, space, '.', '_' or '-'.")
     return value
 
 
@@ -260,12 +260,12 @@ class NodeActions:
         into = self._socket(target.inputs, str(command.get("toSocket", "")), "toSocket")
         if reaches(tree, target, source):  # includes a self link
             raise ActionRefused(f"Link {source.get('brokkr_id')} -> {target.get('brokkr_id')} would make a cycle.")
-        displaced = [l.from_socket for l in tree.links if l.to_socket == into] if not getattr(into, "is_multi_input", False) else []
+        displaced = [(l.from_socket, l.is_muted) for l in tree.links if l.to_socket == into] if not getattr(into, "is_multi_input", False) else []
         link = tree.links.new(out, into)  # replaces whatever single link the input had
         if not link.is_valid:
             tree.links.remove(link)
-            for old in displaced:
-                tree.links.new(old, into)
+            for old, muted in displaced:
+                tree.links.new(old, into).is_muted = muted
             raise ActionRefused(f"Link {out.name} -> {into.name} is not valid (type or field/single-value mismatch).")
         return f"Linked {source.get('brokkr_id')}.{out.identifier} -> {target.get('brokkr_id')}.{into.identifier}.", tree.name
 
@@ -298,7 +298,10 @@ class NodeActions:
 
     def _removeModifier(self, command: dict[str, Any]) -> tuple[str, str]:
         obj = self._object(command)
-        name = text(command, "modifierName", KEY_PATTERN, "modifierName", required=False) or "Brokkr GeoNodes"
+        # A lookup, not a creation: a modifier made by hand may have any name Blender allows.
+        name = command.get("modifierName") or "Brokkr GeoNodes"
+        if not isinstance(name, str) or len(name) > 255 or "\0" in name:
+            raise ActionRefused("modifierName must be a string of at most 255 characters.")
         modifier = obj.modifiers.get(name)
         if modifier is None:
             return f"Modifier {name!r} was already absent.", obj.name

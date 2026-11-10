@@ -229,6 +229,20 @@ refused = [act(t5, action="linkSockets", treeKey="C", fromNode=ids[-1], fromSock
 R["cycle_probe_seconds"] = round(time.time() - t0, 3)
 check("every closing link on a 60-node chain with skip links is refused", all(refused) and len(bpy.data.node_groups["C"].links) == before, (sum(refused), len(refused), R["cycle_probe_seconds"]))
 
+
+# ---- fix-pass checks: muted state survives a refused link; hand-made Unicode modifier names are removable
+t6 = fresh()
+graph(t6, "Mu", GEO_OUT, [dict(id="cube", blIdname="GeometryNodeMeshCube"), dict(id="m", blIdname="ShaderNodeMath"), dict(id="iop", blIdname="GeometryNodeInstanceOnPoints")], [("cube", "Mesh", "iop", "Points")])
+for l in bpy.data.node_groups["Mu"].links:
+    if l.to_node.get("brokkr_id") == "iop": l.is_muted = True
+r = act(t6, action="linkSockets", treeKey="Mu", fromNode="m", fromSocket="Value", toNode="iop", toSocket="Points")
+muted = [l.is_muted for l in bpy.data.node_groups["Mu"].links if l.to_node.get("brokkr_id") == "iop"]
+check("refused link restores the displaced link's muted state", r["status"] == "failed" and muted == [True], (r["message"], muted))
+ok(t6, action="createObject", objectType="MESH", name="U")
+bpy.data.objects["U"].modifiers.new("G\u00e9 x", "NODES")
+r = act(t6, action="removeModifier", objectName="U", modifierName="G\u00e9 x")
+check("hand-made Unicode modifier name is removable", r["status"] == "accepted" and len(bpy.data.objects["U"].modifiers) == 0, r["message"])
+
 # ---- cost: a heavy graph must not stall capture
 def heavy(n, instanced):
     tt = fresh()

@@ -94,7 +94,7 @@ class Links(list):
     def new(self, a, b):
         for old in [l for l in self if l.to_socket is b]:  # a single-link input loses its old link, as in Blender
             list.remove(self, old)
-        link = NS(from_socket=a, to_socket=b, from_node=Proxy(a.node), to_node=Proxy(b.node), is_valid=self.valid(a, b) if callable(self.valid) else self.valid)
+        link = NS(from_socket=a, to_socket=b, from_node=Proxy(a.node), to_node=Proxy(b.node), is_muted=False, is_valid=self.valid(a, b) if callable(self.valid) else self.valid)
         self.append(link)
         return link
 
@@ -431,8 +431,11 @@ class NodeActionTests(unittest.TestCase):
         self.assertEqual(host.tagged, tags + 1)
         self.assertIn("already absent", self.accepted(action="removeModifier", objectName="Host", modifierName="GN")["message"])
         self.refused(action="removeModifier", objectName="Nope", modifierName="GN")
-        for bad in (["x"], "x" * 64, "a/b"):
+        for bad in (["x"], "x" * 256, "a\0b", 5):
             self.refused(action="removeModifier", objectName="Host", modifierName=bad)
+        host.modifiers.new("Gé x/y", "NODES")  # made by hand: any name Blender allows can be removed
+        self.accepted(action="removeModifier", objectName="Host", modifierName="Gé x/y")
+        self.assertEqual([m.name for m in host.modifiers], ["Sub"])
 
     # setObjectCustomProperty on a Geometry Nodes host
     def test_custom_property_naming_a_modifier_input_identifier_is_refused(self):
@@ -468,6 +471,16 @@ class NodeActionTests(unittest.TestCase):
         tree.links.valid = lambda a, b: a is not tree.nodes[3].outputs[0]  # b.Out -> anything is invalid
         self.refused(action="linkSockets", treeKey="G", fromNode="b", fromSocket="Out", toNode="c", toSocket="A")
         self.assertEqual([(l.from_socket, l.to_socket) for l in tree.links], [(tree.nodes[2].outputs[0], tree.nodes[4].inputs[0])])
+
+    def test_refused_link_restores_the_displaced_link_muted_state(self):
+        tree = self.group()
+        for node_id in ("a", "b", "c"):
+            self.accepted(action="addNode", treeKey="G", id=node_id, blIdname="ShaderNodeMath")
+        self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="c", toSocket="A")
+        tree.links[0].is_muted = True
+        tree.links.valid = lambda a, b: False
+        self.refused(action="linkSockets", treeKey="G", fromNode="b", fromSocket="Out", toNode="c", toSocket="A")
+        self.assertEqual([l.is_muted for l in tree.links], [True])
 
     def test_ints_are_capped_and_patterns_reject_trailing_newlines(self):
         self.group()

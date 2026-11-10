@@ -514,7 +514,7 @@
   {
    "name": "trailing newline in an id refused",
    "ok": true,
-   "detail": "id must be 1..63 characters of letters, digits, '.', '_' or '-'."
+   "detail": "id must be 1..63 characters of letters, digits, space, '.', '_' or '-'."
   },
   {
    "name": "createNodeGroup Off",
@@ -959,6 +959,51 @@
    ]
   },
   {
+   "name": "createNodeGroup Mu",
+   "ok": true,
+   "detail": "Created node group; interface identifiers: output Geometry=Socket_0"
+  },
+  {
+   "name": "addNode cube",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode m",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "addNode iop",
+   "ok": true,
+   "detail": "Node added."
+  },
+  {
+   "name": "linkSockets Mu",
+   "ok": true,
+   "detail": "Linked cube.Mesh -> iop.Points."
+  },
+  {
+   "name": "refused link restores the displaced link's muted state",
+   "ok": true,
+   "detail": [
+    "Link Value -> Points is not valid (type or field/single-value mismatch).",
+    [
+     true
+    ]
+   ]
+  },
+  {
+   "name": "createObject ",
+   "ok": true,
+   "detail": "Blender object created."
+  },
+  {
+   "name": "hand-made Unicode modifier name is removable",
+   "ok": true,
+   "detail": "Modifier removed."
+  },
+  {
    "name": "createNodeGroup Heavy",
    "ok": true,
    "detail": "Created node group; interface identifiers: output Geometry=Socket_0"
@@ -1007,7 +1052,7 @@
    "name": "2000x2000 instanced grid: capture is bounded",
    "ok": true,
    "detail": [
-    1.29,
+    1.2,
     99999,
     false
    ]
@@ -1047,6 +1092,6 @@
   }
  ],
  "cycle_probe_seconds": 0.008,
- "capture_2000_grid_instanced_seconds": 1.285,
- "capture_2000_grid_mesh_seconds": 0.054
+ "capture_2000_grid_instanced_seconds": 1.198,
+ "capture_2000_grid_mesh_seconds": 0.045
 }
