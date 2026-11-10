@@ -98,7 +98,7 @@ def resolve_inside(root: str, candidate: str, label: str, *, new_file: bool = Fa
     except ValueError:
         raise ActionRefused(f"{label} path is outside the configured {label} directory.") from None
     if new_file and os.path.lexists(current):
-        raise ActionRefused(f"{label} path already exists; renderStill never overwrites or writes through an existing name.")
+        raise ActionRefused(f"{label} path already exists; output actions never overwrite or write through an existing name.")
     return current
 
 
