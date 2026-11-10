@@ -187,6 +187,15 @@ def integer(command: dict[str, Any], key: str, low: int, high: int) -> int | Non
     return int(value)
 
 
+def unit_component(key: str, item: Any) -> float:
+    """One colour component: a number in [0, 1]. The range test comes first: it also refuses nan and inf,
+    and a huge int (10**400) never reaches math.isfinite, which would raise OverflowError instead of
+    naming the field."""
+    if isinstance(item, bool) or not isinstance(item, (int, float)) or not 0.0 <= item <= 1.0:
+        raise ActionRefused(f"{key} components must be numbers between 0 and 1.")
+    return float(item)
+
+
 def color(command: dict[str, Any], key: str = "color") -> tuple[float, float, float] | None:
     """Linear RGB, three finite numbers in [0, 1], or None when absent."""
     if key not in command or command[key] is None:
@@ -196,9 +205,7 @@ def color(command: dict[str, Any], key: str = "color") -> tuple[float, float, fl
         raise ActionRefused(f"{key} must be three numbers [r, g, b].")
     parts = []
     for item in value:
-        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or not 0.0 <= item <= 1.0:
-            raise ActionRefused(f"{key} components must be numbers between 0 and 1.")
-        parts.append(float(item))
+        parts.append(unit_component(key, item))
     return (parts[0], parts[1], parts[2])
 
 
@@ -211,9 +218,7 @@ def color_rgba(command: dict[str, Any], key: str = "color") -> tuple[float, floa
         raise ActionRefused(f"{key} must be [r, g, b] or [r, g, b, a].")
     parts = []
     for item in value:
-        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or not 0.0 <= item <= 1.0:
-            raise ActionRefused(f"{key} components must be numbers between 0 and 1.")
-        parts.append(float(item))
+        parts.append(unit_component(key, item))
     return (parts[0], parts[1], parts[2], parts[3] if len(parts) == 4 else 1.0)
 
 

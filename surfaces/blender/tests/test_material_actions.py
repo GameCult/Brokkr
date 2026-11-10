@@ -83,13 +83,26 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(self.base_color("glass"), (0.1, 0.2, 0.3, 0.5))
         self.assertEqual(tuple(self.bpy.data.materials["glass"].diffuse_color), (0.1, 0.2, 0.3, 0.5))
 
+    def test_the_colour_limits_themselves_are_accepted(self):
+        self.assign(materialName="black", color=[0, 0, 0])
+        self.assertEqual(self.base_color("black"), (0.0, 0.0, 0.0, 1.0))
+        self.assign(materialName="white", color=[1, 1, 1, 1])
+        self.assertEqual(self.base_color("white"), (1.0, 1.0, 1.0, 1.0))
+        self.assign(materialName="clear", color=[1.0, 0.0, 0.5, 0])
+        self.assertEqual(self.base_color("clear"), (1.0, 0.0, 0.5, 0.0))
+
+    def test_an_explicit_null_colour_is_no_colour(self):
+        self.assertEqual(self.assign(materialName="plain", color=None)["status"], "accepted")
+        self.assertEqual(tuple(self.bpy.data.materials["plain"].diffuse_color), (0.8, 0.8, 0.8, 1.0))
+
     def test_no_colour_leaves_a_new_material_at_blender_defaults(self):
         self.assertEqual(self.assign(materialName="plain")["status"], "accepted")
         self.assertEqual(tuple(self.bpy.data.materials["plain"].diffuse_color), (0.8, 0.8, 0.8, 1.0))
 
     def test_malformed_colour_is_refused_naming_color_and_changes_nothing(self):
         for bad in ([1], [1, 0], [0, 0, 0, 1, 1], "red", 0.5, {"r": 1}, ["a", 0, 0], [True, 0, 0], [None, 0, 0],
-                    [float("nan"), 0, 0], [float("inf"), 0, 0], [-0.1, 0, 0], [1.1, 0, 0], [0, 0, 0, 2]):
+                    [float("nan"), 0, 0], [float("inf"), 0, 0], [-0.1, 0, 0], [1.1, 0, 0], [0, 0, 0, 2],
+                    [1.0000001, 0, 0], [-1e-9, 0, 0], [0, 0, 0, 1.0000001], [10**400, 0, 0], [0, -10**400, 0]):
             receipt = self.assign(materialName="oxide red", color=bad)
             self.assertEqual(receipt["status"], "failed", bad)
             self.assertIn("color", receipt["message"], bad)
