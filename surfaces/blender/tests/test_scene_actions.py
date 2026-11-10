@@ -397,7 +397,7 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(self.bpy.created, [])
 
     def test_create_object_refuses_a_mesh_type_other_than_cube(self):
-        for mesh_type in ("CYLINDER", "", 1):
+        for mesh_type in ("CYLINDER", "", 1, " CUBE", "CUBE "):
             receipt = self.run_action(action="createObject", objectType="MESH", meshType=mesh_type)
             self.assertEqual(receipt["status"], "failed", mesh_type)
             self.assertIn("CUBE", receipt["message"])
