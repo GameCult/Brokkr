@@ -108,6 +108,7 @@ Admitted command actions:
 - `selectObject`
 - `assignMaterial`
 - `importGltf`
+- `exportGltf`
 - `setCamera`
 - `setLight`
 - `setWorld`
@@ -123,6 +124,16 @@ gets a `failed` receipt whose message names the rule):
 - `importGltf`: `filepath`, `.gltf` or `.glb`, relative to the add-on preference
   `Import Directory` (absolute paths, `..` and symlinks that resolve outside it are
   refused). Empty `Import Directory` disables the action. Needs Blender's glTF add-on.
+- `exportGltf`: `filepath`, `.glb` (binary) or `.gltf` (separate `.bin`), relative to the
+  add-on preference `Render Output Directory` (the renderStill rules: no `..`, no links, and an
+  existing name, or an existing `.bin` beside a `.gltf`, is refused; there is no overwrite).
+  Optional `extras` (custom properties become node `extras`), `yUp`, `applyModifiers`
+  (each true by default, must be a boolean) and `selection` (a non-empty list of object
+  names; any name not found, or not in the active view layer, refuses the export; the
+  selection is touched only when one is given, and restored afterwards). Not checked: texture
+  files a `.gltf` export writes beside it (only the `.bin` is), and a link or swap made between the
+  check and the write (the same residual as renderStill).
+  The receipt message carries the written path and byte size. Needs Blender's glTF add-on.
 - `setCamera`: `targetObjectName` (a camera object); optional `lens` (mm),
   `cameraType` (`PERSP`, `ORTHO`, `PANO`), `panoramaType` (for example
   `EQUIRECTANGULAR`; read from the camera, or from `camera.cycles` before Blender 4.2),
@@ -132,6 +143,15 @@ gets a `failed` receipt whose message names the rule):
   `color` (linear `[r, g, b]`, each 0 to 1), `lightType` (`POINT`, `SUN`, `SPOT`, `AREA`).
 - `setWorld`: optional `worldName` (default: the scene's world, created if there is
   none), `color` (`[r, g, b]`), `strength`. Edits the world's Background node.
+- `assignMaterial`: `targetObjectName` (an object with material slots, such as a mesh);
+  optional `materialName` (default `Brokkr Material`; an existing material of that name
+  is reused) and `color` (linear `[r, g, b]` or `[r, g, b, a]`, each a finite number 0
+  to 1; alpha defaults to 1). `color` sets the Principled BSDF Base Color (the node tree
+  is created if the material has none) and `diffuse_color`; a malformed `color` is
+  refused naming the field and nothing is created or changed (`"color": null` counts as absent). Without `color` an
+  existing material's colour is left as it is. Idempotent per (object, material): if the
+  object already has a slot with that material no second slot is added. Other keys are
+  ignored, as for every action.
 - `renderStill`: `outputPath` relative to the preference `Render Output Directory`,
   ending `.png`, `.jpg` or `.exr` (same containment rules as import); optional
   `engine` (any engine of the running Blender, case-insensitive), `resolutionX`,

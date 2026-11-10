@@ -245,6 +245,7 @@ fn build_provider_advertisement() -> ProviderAdvertisement {
                     "selection.read",
                     "selection.write",
                     "asset.import.gltf",
+                    "asset.export.gltf",
                     "camera.write",
                     "light.write",
                     "world.write",
@@ -1994,6 +1995,7 @@ mod tests {
         assert!(blender.capabilities.contains(&"material.assign"));
         for scene_and_graph in [
             "asset.import.gltf",
+            "asset.export.gltf",
             "camera.write",
             "light.write",
             "world.write",
