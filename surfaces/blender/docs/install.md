@@ -117,6 +117,11 @@ Admitted command actions:
 Scene action fields (all other keys are ignored; a refused intent changes nothing and
 gets a `failed` receipt whose message names the rule):
 
+- `createObject`: optional `objectType` (`MESH`, `LIGHT`, `CAMERA`, `EMPTY`; default `EMPTY`),
+  `name`, `location`. Any other `objectType` (for example `TEXT` or `CURVE`) is refused with
+  the allowed set named. A `MESH` is a cube (`size`); a `meshType` other than `CUBE`
+  (case-insensitive, no surrounding whitespace) is refused rather than ignored.
+  `meshType` is checked only when `objectType` is `MESH`; an explicit `objectType: null` is refused.
 - `importGltf`: `filepath`, `.gltf` or `.glb`, relative to the add-on preference
   `Import Directory` (absolute paths, `..` and symlinks that resolve outside it are
   refused). Empty `Import Directory` disables the action. Needs Blender's glTF add-on.
@@ -153,7 +158,12 @@ gets a `failed` receipt whose message names the rule):
   `engine` (any engine of the running Blender, case-insensitive), `resolutionX`,
   `resolutionY` (whole numbers, 1 to 16384), `cameraName`. Engine, resolution,
   camera, file path and format are restored after the render. The render blocks
-  Blender's UI until it finishes.
+  Blender's UI until it finishes. In a background (`-b`) Blender on Linux, the GL
+  engines `BLENDER_WORKBENCH`, `BLENDER_EEVEE` and `BLENDER_EEVEE_NEXT` are refused
+  with a `failed` receipt when `libEGL.so.1` cannot be loaded (probed once and cached for the life of the process), because
+  rendering would abort the whole process with no receipt; `CYCLES` renders on the
+  CPU. The check applies to the scene's engine when `engine` is omitted. No such
+  check runs on Windows or macOS.
 
 The scene actions were run against Blender 5.2.3 LTS headless with
 `surfaces/blender/tests/live/headless_smoke.py` (usage in its docstring). One real

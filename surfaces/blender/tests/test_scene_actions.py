@@ -86,6 +86,8 @@ class FakeBpy:
             worlds=NS(get=lambda name: None, new=self.new_world),
         )
         self.path = NS(abspath=lambda p: p)
+        self.created = []
+        self.app = NS(background=False)
         self.exported = []
         self.export_result = {"FINISHED"}
         self.export_writes = True
@@ -93,8 +95,18 @@ class FakeBpy:
             o.selected = o is self.mesh
             o.select_get = (lambda o=o: o.selected)
             o.select_set = (lambda state, o=o: setattr(o, "selected", state))
+        add = lambda kind: (lambda **kw: self.add_object(kind, kw))
         self.ops = NS(import_scene=NS(gltf=self.import_gltf), render=NS(render=self.render_still),
-                      export_scene=NS(gltf=self.export_gltf))
+                      export_scene=NS(gltf=self.export_gltf),
+                      mesh=NS(primitive_cube_add=add("MESH")), object=NS(light_add=add("LIGHT"),
+                      camera_add=add("CAMERA"), empty_add=add("EMPTY")))
+        self.on_add = lambda obj: None
+
+    def add_object(self, kind, kwargs):
+        self.created.append((kind, kwargs))
+        obj = NS(name=kind.title(), type=kind)
+        self.data.objects[obj.name] = obj
+        self.on_add(obj)
 
     def new_world(self, name):
         background = NS(inputs={"Color": NS(default_value=None), "Strength": NS(default_value=None)})
@@ -132,7 +144,9 @@ class ActionTests(unittest.TestCase):
         self.bpy = FakeBpy()
         self.target = bt.BrokkrBlenderTarget(self.bpy)
         self.target.configure_action_dirs(str(self.root / "in"), str(self.root / "out"))
-        self.context = NS(scene=self.bpy.scene, view_layer=NS(objects=Objects(dict(self.bpy.data.objects.items()))))
+        self.context = NS(scene=self.bpy.scene, object=None,
+                          view_layer=NS(objects=Objects(dict(self.bpy.data.objects.items()))))
+        self.bpy.on_add = lambda obj: setattr(self.context, "object", obj)
 
     def run_action(self, **command):
         command.setdefault("commandId", "c1")
@@ -364,6 +378,78 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(self.bpy.rendered, [])
         self.target.configure_action_dirs(str(self.root / "in"), "")
         self.assertEqual(self.run_action(action="renderStill", outputPath="a.png")["status"], "failed")
+
+    # createObject
+    def test_create_object_makes_the_four_admitted_types(self):
+        for kind in ("MESH", "LIGHT", "CAMERA", "EMPTY"):
+            receipt = self.run_action(action="createObject", objectType=kind, name="N")
+            self.assertEqual(receipt["status"], "accepted", kind)
+            self.assertEqual(self.bpy.created[-1][0], kind)
+        self.assertEqual(self.run_action(action="createObject", objectType="MESH", meshType="cube")["status"], "accepted")
+
+    def test_create_object_refuses_other_types_naming_the_type_and_the_allowed_set(self):
+        for kind in ("TEXT", "CURVE", "mesh", "", None, 3):
+            receipt = self.run_action(action="createObject", objectType=kind)
+            self.assertEqual(receipt["status"], "failed", kind)
+            for allowed in ("MESH", "LIGHT", "CAMERA", "EMPTY"):
+                self.assertIn(allowed, receipt["message"])
+            self.assertIn(repr(kind) if not isinstance(kind, str) else kind, receipt["message"])
+        self.assertEqual(self.bpy.created, [])
+
+    def test_create_object_refuses_a_mesh_type_other_than_cube(self):
+        for mesh_type in ("CYLINDER", "", 1, " CUBE", "CUBE "):
+            receipt = self.run_action(action="createObject", objectType="MESH", meshType=mesh_type)
+            self.assertEqual(receipt["status"], "failed", mesh_type)
+            self.assertIn("CUBE", receipt["message"])
+        self.assertEqual(self.bpy.created, [])
+
+    # renderStill: GPU engines without a GL runtime
+    def test_render_still_refuses_gpu_engines_headless_when_the_gl_library_is_missing(self):
+        self.bpy.app.background = True
+        for engine in ("BLENDER_WORKBENCH", "BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "blender_workbench"):
+            self.bpy.scene.render.ENGINES = FakeRender.ENGINES + ("BLENDER_EEVEE_NEXT",)
+            with mock.patch.object(bt, "missing_gl_library", return_value="libEGL.so.1"):
+                receipt = self.run_action(action="renderStill", outputPath="a.png", engine=engine)
+            self.assertEqual(receipt["status"], "failed", engine)
+            self.assertIn("libEGL.so.1", receipt["message"])
+            self.assertIn("CYCLES", receipt["message"])
+        self.assertEqual(self.bpy.rendered, [])
+        self.assertEqual(self.bpy.scene.render.engine, "BLENDER_EEVEE")
+
+    def test_render_still_refuses_the_scene_engine_too_and_leaves_no_folder(self):
+        self.bpy.app.background = True  # scene engine is BLENDER_EEVEE
+        with mock.patch.object(bt, "missing_gl_library", return_value="libEGL.so.1"):
+            receipt = self.run_action(action="renderStill", outputPath="shots/a.png")
+        self.assertEqual(receipt["status"], "failed")
+        self.assertFalse((self.root / "out" / "shots").exists())
+
+    def test_render_still_gl_check_spares_cycles_foreground_and_a_present_library(self):
+        probe = mock.Mock(return_value="libEGL.so.1")
+        with mock.patch.object(bt, "missing_gl_library", probe):
+            self.bpy.app.background = True
+            self.assertEqual(self.run_action(action="renderStill", outputPath="a.png", engine="CYCLES")["status"], "accepted")
+            probe.assert_not_called()
+            self.bpy.app.background = False
+            self.assertEqual(self.run_action(action="renderStill", outputPath="b.png", engine="BLENDER_WORKBENCH")["status"], "accepted")
+            probe.assert_not_called()
+            self.bpy.app.background = True
+            probe.return_value = None
+            self.assertEqual(self.run_action(action="renderStill", outputPath="c.png", engine="BLENDER_WORKBENCH")["status"], "accepted")
+
+    def test_missing_gl_library_probes_only_on_linux_and_only_once(self):
+        bt.missing_gl_library.cache_clear()
+        with mock.patch.object(bt.sys, "platform", "win32"), mock.patch.object(bt.ctypes, "CDLL", side_effect=OSError) as cdll:
+            self.assertIsNone(bt.missing_gl_library())
+            cdll.assert_not_called()
+        bt.missing_gl_library.cache_clear()
+        with mock.patch.object(bt.sys, "platform", "linux"), mock.patch.object(bt.ctypes, "CDLL", side_effect=OSError) as cdll:
+            self.assertEqual(bt.missing_gl_library(), "libEGL.so.1")
+            self.assertEqual(bt.missing_gl_library(), "libEGL.so.1")
+            cdll.assert_called_once_with("libEGL.so.1")
+        bt.missing_gl_library.cache_clear()
+        with mock.patch.object(bt.sys, "platform", "linux"), mock.patch.object(bt.ctypes, "CDLL"):
+            self.assertIsNone(bt.missing_gl_library())
+        bt.missing_gl_library.cache_clear()
 
     # importGltf: names
     def test_import_refuses_drive_unc_extended_stream_and_device_names(self):

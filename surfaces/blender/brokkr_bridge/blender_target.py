@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import functools
 import json
 import math
 import os
@@ -33,6 +35,13 @@ SYNC_OBJECT_BINDING_SCHEMA = "brokkr.sync.object_binding.v0"
 SYNC_VAR_SCHEMA = "brokkr.sync.var.v0"
 SYNC_TIMELINE_BINDING_SCHEMA = "brokkr.sync.timeline_binding.v0"
 SYNC_RECEIPT_SCHEMA = "brokkr.sync.receipt.v0"
+
+CREATABLE_OBJECT_TYPES = ("MESH", "LIGHT", "CAMERA", "EMPTY")
+
+# Engines that draw through the GL stack. A headless Linux Blender without libEGL aborts the whole
+# process inside bpy.ops.render.render for these (no receipt); CYCLES renders on the CPU.
+GL_RENDER_ENGINES = ("BLENDER_WORKBENCH", "BLENDER_EEVEE", "BLENDER_EEVEE_NEXT")
+GL_RUNTIME_LIBRARY = "libEGL.so.1"
 
 EVALUATED_POSITION_CAP = 256
 EVALUATED_VERTEX_LIMIT = 1_000_000
@@ -521,6 +530,14 @@ class BrokkrBlenderTarget:
 
     def _create_object(self, context: Any, command: dict[str, Any]) -> dict[str, Any]:
         object_type = command.get("objectType", "EMPTY")
+        if not isinstance(object_type, str) or object_type not in CREATABLE_OBJECT_TYPES:
+            shown = object_type if isinstance(object_type, str) else repr(object_type)
+            raise sa.ActionRefused(
+                f"objectType {shown!r} cannot be created; allowed: {', '.join(CREATABLE_OBJECT_TYPES)}.")
+        mesh_type = command.get("meshType")
+        if object_type == "MESH" and mesh_type is not None and (
+                not isinstance(mesh_type, str) or mesh_type.upper() != "CUBE"):
+            raise sa.ActionRefused(f"meshType {mesh_type!r} is not available; a MESH is a CUBE.")
         name = command.get("name") or f"Brokkr {object_type.title()}"
         location = _vector(command.get("location"), 3, (0.0, 0.0, 0.0))
 
@@ -530,7 +547,7 @@ class BrokkrBlenderTarget:
             self.bpy.ops.object.light_add(type=command.get("lightType", "POINT"), location=location)
         elif object_type == "CAMERA":
             self.bpy.ops.object.camera_add(location=location)
-        else:
+        else:  # EMPTY
             self.bpy.ops.object.empty_add(type=command.get("emptyDisplayType", "PLAIN_AXES"), location=location)
 
         obj = context.object
@@ -809,6 +826,12 @@ class BrokkrBlenderTarget:
                     render.engine = engine
                 except TypeError:
                     raise sa.ActionRefused(f"engine {engine} is not available in this Blender.") from None
+            if render.engine in GL_RENDER_ENGINES and getattr(getattr(self.bpy, "app", None), "background", False):
+                missing = missing_gl_library()
+                if missing:
+                    raise sa.ActionRefused(
+                        f"engine {render.engine} needs {missing}, which this headless Blender cannot load "
+                        "(rendering would abort the process); use engine CYCLES.")
             if width is not None:
                 render.resolution_x = width
             if height is not None:
@@ -1089,6 +1112,19 @@ def _load_cultmesh(cultlib_py_src: str) -> tuple[Any, Any]:
             "to the CultLib packages directory or install cultcache-py, cultnet-py and cultmesh-py into Blender's Python."
         ) from exc
     return cultmesh_py, cultcache_py
+
+
+@functools.lru_cache(maxsize=None)
+def missing_gl_library() -> str | None:
+    """The GL runtime library this host cannot load, or None. Probed once, on Linux only: on
+    Windows and macOS a failed GPU render is not a headless-EGL abort."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        ctypes.CDLL(GL_RUNTIME_LIBRARY)
+    except OSError:
+        return GL_RUNTIME_LIBRARY
+    return None
 
 
 def _now() -> str:
