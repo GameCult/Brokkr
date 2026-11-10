@@ -3,7 +3,7 @@
 Command intents (`brokkr.blender.command_intent.v0`) that build and drive a Geometry Nodes graph.
 Owner: `brokkr_bridge/node_actions.py`; the target only dispatches. Every field is validated before
 `bpy` is touched; a refused intent is a `failed` receipt naming the rule and leaves the tree as it was.
-Design and the parts not built yet: the design document lives in PR #3 (branch `libby/blender-node-graphs-design`), not in this tree.
+Design and the parts not built yet: the design lives at tag `parked/blender-node-graphs-design` (branch `libby/blender-node-graphs-design`, PR #3, closed unmerged), not in this tree.
 
 | action | fields | rule |
 |---|---|---|
