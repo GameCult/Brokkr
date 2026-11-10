@@ -31,12 +31,19 @@ class Sock:
 class Node(dict):
     """A node; ID properties are the dict part."""
 
+    counter = 1000
+
+    def as_pointer(self):
+        return self.pointer
+
     PROPS = {"operation": NS(type="ENUM", is_readonly=False), "flag": NS(type="BOOLEAN", is_readonly=False),
              "filepath": NS(type="STRING", is_readonly=False), "location": NS(type="FLOAT", is_readonly=False)}
 
     def __init__(self, idname):
         super().__init__()
         self.bl_idname, self.location, self.label, self.operation, self.flag = idname, [0, 0], "", "ADD", False
+        Node.counter += 1
+        self.pointer = Node.counter
         self.bl_rna = NS(properties=self.PROPS)
         self.inputs = [Sock("A", "A"), Sock("Size", "Size", "VECTOR", (1.0, 1.0, 1.0)), Sock("B", "Dup"), Sock("B_VEC", "Dup")]
         self.outputs = [Sock("Out", "Out")]
@@ -61,6 +68,24 @@ class Nodes(list):
         list.remove(self, node)
 
 
+class Proxy:
+    """A fresh wrapper per access, as bpy hands out: equal by pointer, with a different id() each time."""
+
+    def __init__(self, node):
+        self._node = node
+
+    def as_pointer(self):
+        return self._node.pointer
+
+    def __getattr__(self, name):
+        return getattr(self._node, name)
+
+    def __eq__(self, other):
+        return getattr(other, "pointer", None) == self._node.pointer or (isinstance(other, Proxy) and other._node is self._node)
+
+    __hash__ = None
+
+
 class Links(list):
     def __init__(self, valid=True):
         super().__init__()
@@ -69,7 +94,7 @@ class Links(list):
     def new(self, a, b):
         for old in [l for l in self if l.to_socket is b]:  # a single-link input loses its old link, as in Blender
             list.remove(self, old)
-        link = NS(from_socket=a, to_socket=b, from_node=a.node, to_node=b.node, is_valid=self.valid(a, b) if callable(self.valid) else self.valid)
+        link = NS(from_socket=a, to_socket=b, from_node=Proxy(a.node), to_node=Proxy(b.node), is_valid=self.valid(a, b) if callable(self.valid) else self.valid)
         self.append(link)
         return link
 
@@ -331,6 +356,44 @@ class NodeActionTests(unittest.TestCase):
         self.assertEqual(list(tree.links), before)
         self.accepted(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="c", toSocket="Size")  # a forward skip is no cycle
 
+    def test_cycle_detection_survives_fresh_node_wrappers_on_long_chains(self):
+        tree = self.group()
+        ids = [f"n{i}" for i in range(12)]
+        for node_id in ids:
+            self.accepted(action="addNode", treeKey="G", id=node_id, blIdname="ShaderNodeMath")
+        for a, b in zip(ids, ids[1:]):
+            self.accepted(action="linkSockets", treeKey="G", fromNode=a, fromSocket="Out", toNode=b, toSocket="A")
+        # a diamond ladder: every rung reachable two ways
+        for a, b in zip(ids[:-2], ids[2:]):
+            self.accepted(action="linkSockets", treeKey="G", fromNode=a, fromSocket="Out", toNode=b, toSocket="Size")
+        count = len(tree.links)
+        for head in ids[:-1]:
+            self.refused(action="linkSockets", treeKey="G", fromNode=ids[-1], fromSocket="Out", toNode=head, toSocket="Size")
+        self.assertEqual(len(tree.links), count)
+
+    def test_cycle_through_a_later_branch_is_found(self):
+        tree = self.group()
+        for node_id in "abcd":
+            self.accepted(action="addNode", treeKey="G", id=node_id, blIdname="ShaderNodeMath")
+        for src, dst in (("a", "b"), ("a", "c"), ("c", "d")):
+            self.accepted(action="linkSockets", treeKey="G", fromNode=src, fromSocket="Out", toNode=dst, toSocket="A")
+        self.refused(action="linkSockets", treeKey="G", fromNode="d", fromSocket="Out", toNode="a", toSocket="A")
+
+    def test_cycle_walk_visits_each_node_once_on_a_ladder(self):
+        tree = self.group()
+        ids = [f"n{i}" for i in range(40)]
+        for node_id in ids:
+            self.accepted(action="addNode", treeKey="G", id=node_id, blIdname="ShaderNodeMath")
+        for a, b in zip(ids, ids[1:]):
+            tree.links.new(tree.nodes[2 + ids.index(a)].outputs[0], tree.nodes[2 + ids.index(b)].inputs[0])
+        for a, b in zip(ids, ids[2:]):
+            tree.links.new(tree.nodes[2 + ids.index(a)].outputs[0], tree.nodes[2 + ids.index(b)].inputs[1])
+        calls = []
+        real = na.node_key
+        with unittest.mock.patch.object(na, "node_key", lambda n: calls.append(1) or real(n)):
+            self.assertFalse(na.reaches(tree, tree.nodes[2], NS(pointer=-1, as_pointer=lambda: -1)))
+        self.assertLess(len(calls), 4 * len(tree.links))
+
     def test_remove_node(self):
         tree = self.chain()
         self.accepted(action="removeNode", treeKey="G", id="b")
@@ -368,6 +431,8 @@ class NodeActionTests(unittest.TestCase):
         self.assertEqual(host.tagged, tags + 1)
         self.assertIn("already absent", self.accepted(action="removeModifier", objectName="Host", modifierName="GN")["message"])
         self.refused(action="removeModifier", objectName="Nope", modifierName="GN")
+        for bad in (["x"], "x" * 64, "a/b"):
+            self.refused(action="removeModifier", objectName="Host", modifierName=bad)
 
     # setObjectCustomProperty on a Geometry Nodes host
     def test_custom_property_naming_a_modifier_input_identifier_is_refused(self):
@@ -492,8 +557,13 @@ class NodeActionTests(unittest.TestCase):
 
         host = self.snapshot_fixture([(0.0, 0.0, 0.0)], many())
         with unittest.mock.patch.object(bt, "EVALUATED_INSTANCE_SCAN_LIMIT", 10):
-            data = self.evaluated(host)
+            scan = self.target._instance_scan()
+        data = self.target._evaluated_snapshot(host, scan)
         self.assertEqual((data["instanceCount"], data["instancesComplete"]), (10, False))
+        other = Obj("Other")
+        other.modifiers.new("GN", "NODES")
+        other.evaluated_get = host.evaluated_get
+        self.assertIsNone(self.target._evaluated_snapshot(other, scan)["instanceCount"])  # never reached: unknown, not 0
         self.assertLessEqual(len(visited), 11)  # the generator is abandoned, not drained
         host = self.snapshot_fixture([(0.0, 0.0, 0.0)], [self.instance(host, (1.0, 0.0, 0.0))])
         self.assertTrue(self.evaluated(host)["instancesComplete"])

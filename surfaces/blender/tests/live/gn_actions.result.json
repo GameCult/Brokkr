@@ -945,6 +945,20 @@
    "detail": "'Sub' is not a Geometry Nodes modifier; only those are removed here."
   },
   {
+   "name": "createNodeGroup C",
+   "ok": true,
+   "detail": "Created node group; interface identifiers: output Geometry=Socket_0"
+  },
+  {
+   "name": "every closing link on a 60-node chain with skip links is refused",
+   "ok": true,
+   "detail": [
+    59,
+    59,
+    0.008
+   ]
+  },
+  {
    "name": "createNodeGroup Heavy",
    "ok": true,
    "detail": "Created node group; interface identifiers: output Geometry=Socket_0"
@@ -993,7 +1007,7 @@
    "name": "2000x2000 instanced grid: capture is bounded",
    "ok": true,
    "detail": [
-    1.38,
+    1.29,
     99999,
     false
    ]
@@ -1032,6 +1046,7 @@
    ]
   }
  ],
- "capture_2000_grid_instanced_seconds": 1.375,
- "capture_2000_grid_mesh_seconds": 0.051
+ "cycle_probe_seconds": 0.008,
+ "capture_2000_grid_instanced_seconds": 1.285,
+ "capture_2000_grid_mesh_seconds": 0.054
 }

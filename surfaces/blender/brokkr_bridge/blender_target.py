@@ -854,12 +854,15 @@ class BrokkrBlenderTarget:
                 mesh.vertices.foreach_get("co", coords)
         finally:
             evaluated.to_mesh_clear()
-        entry = found.get(obj.name) or {"count": 0, "first": [], "min": [], "max": []}
+        entry = found.get(obj.name)
+        reached = entry is not None
+        entry = entry or {"count": 0, "first": [], "min": [], "max": []}
         finite = all(math.isfinite(c) for c in coords) if coords is not None else True
         finite = finite and all(math.isfinite(c) for c in (entry["min"] or []) + (entry["max"] or []) + [c for p in entry["first"] for c in p])
         points = [coords[i:i + 3] for i in range(0, 3 * count, 3)] if coords is not None else []
         result.update({
-            "instanceCount": entry["count"],
+            # An object the stopped scan never reached has an unknown count, not zero.
+            "instanceCount": entry["count"] if complete or reached else None,
             "instancesComplete": complete,
             "positionsSkipped": count > EVALUATED_VERTEX_LIMIT,
             "nonFinite": not finite,

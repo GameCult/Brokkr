@@ -215,6 +215,20 @@ check("removeModifier removes it; evaluated block gone", len(bpy.data.objects["R
 bpy.data.objects["RHost"].modifiers.new("Sub", "SUBSURF")
 r = act(t4, action="removeModifier", objectName="RHost", modifierName="Sub"); check("non-Geometry-Nodes modifier is not removed", r["status"] == "failed" and len(bpy.data.objects["RHost"].modifiers) == 1, r["message"])
 
+
+# ---- cycle detection on a long chain (bpy hands out a fresh wrapper per access; id() would be reused)
+t5 = fresh()
+ok(t5, action="createNodeGroup", treeKey="C", interface=GEO_OUT)
+ids = ["c%d" % i for i in range(60)]
+for i in ids: act(t5, action="addNode", treeKey="C", id=i, blIdname="ShaderNodeMath")
+for a_, b_ in zip(ids, ids[1:]): act(t5, action="linkSockets", treeKey="C", fromNode=a_, fromSocket="Value", toNode=b_, toSocket="Value")
+for a_, b_ in zip(ids[:-2], ids[2:]): act(t5, action="linkSockets", treeKey="C", fromNode=a_, fromSocket="Value", toNode=b_, toSocket="Value_001")
+before = len(bpy.data.node_groups["C"].links)
+t0 = time.time()
+refused = [act(t5, action="linkSockets", treeKey="C", fromNode=ids[-1], fromSocket="Value", toNode=h, toSocket="Value_002")["status"] == "failed" for h in ids[:-1]]
+R["cycle_probe_seconds"] = round(time.time() - t0, 3)
+check("every closing link on a 60-node chain with skip links is refused", all(refused) and len(bpy.data.node_groups["C"].links) == before, (sum(refused), len(refused), R["cycle_probe_seconds"]))
+
 # ---- cost: a heavy graph must not stall capture
 def heavy(n, instanced):
     tt = fresh()

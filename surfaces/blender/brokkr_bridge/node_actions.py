@@ -298,7 +298,7 @@ class NodeActions:
 
     def _removeModifier(self, command: dict[str, Any]) -> tuple[str, str]:
         obj = self._object(command)
-        name = str(command.get("modifierName") or "Brokkr GeoNodes")
+        name = text(command, "modifierName", KEY_PATTERN, "modifierName", required=False) or "Brokkr GeoNodes"
         modifier = obj.modifiers.get(name)
         if modifier is None:
             return f"Modifier {name!r} was already absent.", obj.name
@@ -321,18 +321,29 @@ class NodeActions:
         return f"Modifier input {item.name} set.", obj.name
 
 
+def node_key(node: Any) -> Any:
+    """A stable identity for a node: bpy hands out a fresh wrapper per access, so id() of one is reused by the next."""
+    return node.as_pointer() if hasattr(node, "as_pointer") else id(node)
+
+
 def reaches(tree: Any, start: Any, goal: Any) -> bool:
-    """True if following links forward from `start` arrives at `goal` (so a link goal -> start closes a cycle)."""
-    seen: set[int] = set()
+    """True if following links forward from `start` arrives at `goal` (so a link goal -> start closes a cycle).
+    The adjacency is built once per call, so a call costs O(links)."""
+    forward: dict[Any, list[Any]] = {}
+    for link in tree.links:
+        forward.setdefault(node_key(link.from_node), []).append(link.to_node)
+    target = node_key(goal)
+    seen: set[Any] = set()
     stack = [start]
     while stack:
         node = stack.pop()
-        if node == goal:
+        key = node_key(node)
+        if key == target:
             return True
-        if id(node) in seen:
+        if key in seen:
             continue
-        seen.add(id(node))
-        stack.extend(l.to_node for l in tree.links if l.from_node == node)
+        seen.add(key)
+        stack.extend(forward.get(key, ()))
     return False
 
 

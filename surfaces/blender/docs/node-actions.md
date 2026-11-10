@@ -25,8 +25,10 @@ polygon counts, `instanceCount`, and up to 256 vertex and instance locations (`t
 positions and `vertexBounds*` are in the object's local space; instance locations and `instanceBounds*` are
 world space. Above 1,000,000 vertices only counts are read (`positionsSkipped`); a non-finite coordinate sets
 `nonFinite` and drops the positions and bounds. The instances come from one depsgraph scan per capture.
-`instancesComplete` is false when the depsgraph scan stopped at 100,000 items (`instanceCount` and the instance bounds are then lower bounds); the scan is what costs time (about 5 microseconds per instance in Python), so a 2000 x 2000 grid instanced on points captures in 1.4 s on the test machine where an unbounded scan took 22 s. `instanceCount` counts evaluated instances whose parent is the object, so a curve, point or volume result
+`instancesComplete` is false when the depsgraph scan stopped at 100,000 items (`instanceCount` and the instance bounds are then lower bounds); the scan is what costs time (about 5 microseconds per instance in Python), so a 2000 x 2000 grid instanced on points captures in 1.4 s on the test machine where an unbounded scan took 22 s. `instanceCount` is `null` for an object the stopped scan never reached (unknown, not zero); the 100,000 budget is shared across all objects in depsgraph order, so a host after a heavy one can be starved. Otherwise `instanceCount` counts evaluated instances whose parent is the object, so a curve, point or volume result
 also reads as one instance. `mesh` stays the base mesh.
+
+Known edges: a node duplicated by hand copies its `brokkr_id`, so id lookups act on the first match; `gin`/`gout` are protected by id, and a group whose output node was deleted by hand cannot get a new one through `addNode`; a group left with no users stays in the file until it is saved and reloaded.
 
 Not built: zones, item sockets, multi-input ordering, library groups, group-in-group nodes, batches/rollback across
 intents, an expectedRevision check, per-node cost estimates. Int values are capped at +-4096 and floats at +-1e9,
