@@ -265,6 +265,136 @@ class NodeActionTests(unittest.TestCase):
         tree.library = NS(filepath="lib.blend")
         self.refused(action="addNode", treeKey="G", id="a", blIdname="ShaderNodeMath")
 
+    # access rules, pinned by literals
+    def test_each_denied_node_family_is_refused_alone(self):
+        tree = self.group()
+        denied = ["GeometryNodeImportOBJ", "GeometryNodeExportPLY", "ShaderNodeScript", "GeometryNodeBake", "GeometryNodeGroup",
+                  "GeometryNodeSimulationInput", "GeometryNodeRepeatInput", "GeometryNodeForeachGeometryElementInput",
+                  "GeometryNodeViewer", "ShaderNodeTexImage", "ShaderNodeTexEnvironment", "GeometryNodeImageTexture",
+                  "GeometryNodeInputImage", "ShaderNodeTexIES"]
+        before = len(tree.nodes)
+        for idname in denied:
+            self.refused(action="addNode", treeKey="G", id="x", blIdname=idname)
+        self.assertEqual(len(tree.nodes), before)
+
+    def test_legitimate_node_families_are_allowed(self):
+        for i, idname in enumerate(["ShaderNodeMath", "GeometryNodeMeshGrid", "FunctionNodeCompare", "GeometryNodeSetPosition", "ShaderNodeTexNoise"]):
+            self.group() if i == 0 else None
+            self.accepted(action="addNode", treeKey="G", id=f"n{i}", blIdname=idname)
+
+    def test_idname_must_be_a_whole_known_prefixed_name(self):
+        self.group()
+        for bad in ("Foo", "ShaderNode", "xShaderNodeMath", "ShaderNodeMath\n", "ShaderNode Math", "ShaderNode_Math", "CompositorNodeMath", "ShaderNodeMath;", "", None, 5):
+            self.refused(action="addNode", treeKey="G", id="x", blIdname=bad)
+
+    def test_node_cap_is_exactly_500(self):
+        tree = self.group()
+        for _ in range(497):
+            tree.nodes.new("ShaderNodeMath")
+        self.assertEqual(len(tree.nodes), 499)
+        self.accepted(action="addNode", treeKey="G", id="last", blIdname="ShaderNodeMath")
+        self.assertEqual(len(tree.nodes), 500)
+        self.refused(action="addNode", treeKey="G", id="over", blIdname="ShaderNodeMath")
+
+    def test_interface_cap_is_exactly_64(self):
+        def sockets(count):
+            return [{"inOut": "INPUT", "name": f"s{i}", "type": "Int"} for i in range(count)]
+        self.accepted(action="createNodeGroup", treeKey="A", interface=sockets(64))
+        self.refused(action="createNodeGroup", treeKey="B", interface=sockets(65))
+        self.refused(action="createNodeGroup", treeKey="C", interface=[])
+
+    def test_int_limit_is_exactly_4096(self):
+        self.group()
+        self.accepted(action="addModifier", objectName="Host", modifierName="GN", treeKey="G")
+        for value in (4096, -4096):
+            self.accepted(action="setModifierInput", objectName="Host", modifierName="GN", socket="Count", value=value)
+        for value in (4097, -4097):
+            self.refused(action="setModifierInput", objectName="Host", modifierName="GN", socket="Count", value=value)
+        self.accepted(action="addNode", treeKey="G", id="ok", blIdname="ShaderNodeMath", inputs={"A": 4097})  # a float input has no int cap
+
+    def test_value_limit_is_exactly_one_billion(self):
+        self.group()
+        self.accepted(action="addNode", treeKey="G", id="a", blIdname="ShaderNodeMath", inputs={"A": 1e9})
+        self.accepted(action="addNode", treeKey="G", id="b", blIdname="ShaderNodeMath", inputs={"A": -1e9})
+        self.refused(action="addNode", treeKey="G", id="c", blIdname="ShaderNodeMath", inputs={"A": 1000000001})
+        self.refused(action="addNode", treeKey="G", id="d", blIdname="ShaderNodeMath", inputs={"Size": [0, 0, -1000000001]})
+        self.accepted(action="addNode", treeKey="G", id="e", blIdname="ShaderNodeMath", location=[1e9, -1e9])
+        self.refused(action="addNode", treeKey="G", id="f", blIdname="ShaderNodeMath", location=[1000000001, 0])
+
+    def test_modifier_cap_is_exactly_8(self):
+        self.group()
+        for i in range(8):
+            self.accepted(action="addModifier", objectName="Host", modifierName=f"m{i}", treeKey="G")
+        self.refused(action="addModifier", objectName="Host", modifierName="m8", treeKey="G")
+        self.accepted(action="addModifier", objectName="Host", modifierName="m3", treeKey="G")  # reuse is not growth
+
+    def test_location_must_be_two_finite_numbers(self):
+        tree = self.group()
+        for bad in ([1, 2, 3], "ab", 5, [1, float("nan")], [1, "2"], [True, 1]):
+            self.refused(action="addNode", treeKey="G", id="x", blIdname="ShaderNodeMath", location=bad)
+        self.assertEqual(len(tree.nodes), 2)
+
+    def test_readonly_node_property_is_refused_and_untouched(self):
+        self.group()
+        with unittest.mock.patch.dict(Node.PROPS, {"flag": NS(type="BOOLEAN", is_readonly=True)}):
+            self.refused(action="addNode", treeKey="G", id="x", blIdname="ShaderNodeMath", properties={"flag": True})
+        self.assertEqual(len(self.bpy.data.node_groups["G"].nodes), 2)
+
+    def test_input_without_a_default_or_with_a_link_is_refused(self):
+        tree = self.group()
+        original = Nodes.new
+
+        def linked(nodes, idname):
+            node = original(nodes, idname)
+            node.inputs[0].is_linked = True
+            return node
+        with unittest.mock.patch.object(Nodes, "new", linked):
+            self.refused(action="addNode", treeKey="G", id="x", blIdname="ShaderNodeMath", inputs={"A": 1})
+        self.assertEqual(len(tree.nodes), 2)
+
+        def bare(nodes, idname):
+            node = original(nodes, idname)
+            del node.inputs[0].default_value
+            return node
+        with unittest.mock.patch.object(Nodes, "new", bare):
+            self.refused(action="addNode", treeKey="G", id="y", blIdname="ShaderNodeMath", inputs={"A": 1})
+        self.assertEqual(len(tree.nodes), 2)
+
+    def test_create_node_group_that_fails_midway_leaves_no_group(self):
+        original = Nodes.new
+
+        def failing(nodes, idname):
+            if idname == "NodeGroupOutput":
+                raise RuntimeError("boom")
+            return original(nodes, idname)
+        with unittest.mock.patch.object(Nodes, "new", failing):
+            self.refused(action="createNodeGroup", treeKey="Half", interface=[{"inOut": "INPUT", "name": "a", "type": "Int"}])
+        self.assertNotIn("Half", self.bpy.data.node_groups)
+        self.accepted(action="createNodeGroup", treeKey="Half", interface=[{"inOut": "INPUT", "name": "a", "type": "Int"}])
+
+    def test_add_modifier_will_not_take_over_a_foreign_modifier(self):
+        self.group()
+        host = self.bpy.data.objects["Host"]
+        foreign = host.modifiers.new("Mine", "SUBSURF")
+        self.refused(action="addModifier", objectName="Host", modifierName="Mine", treeKey="G")
+        self.assertIsNone(foreign.node_group)
+        self.assertEqual(len(host.modifiers), 1)
+
+    def test_set_modifier_input_only_drives_geometry_nodes_modifiers(self):
+        tree = self.group()
+        host = self.bpy.data.objects["Host"]
+        foreign = host.modifiers.new("Mine", "SUBSURF")
+        foreign.node_group = tree
+        self.refused(action="setModifierInput", objectName="Host", modifierName="Mine", socket="Count", value=1)
+        self.assertEqual(foreign.properties.inputs.values, {})
+        self.assertEqual(host.tagged, 0)
+
+    def test_blender_capabilities_include_everything_the_daemon_advertises_for_this_cut(self):
+        # brokkr-daemon/src/main.rs lists the same names (and asserts them in its own test); a capability
+        # added to one side only fails one of the two tests.
+        for name in ("asset.import.gltf", "camera.write", "light.write", "world.write", "render.still", "nodegraph.geometry.write", "geometry.evaluated.read"):
+            self.assertIn(name, bt.CAPABILITIES)
+
     # linkSockets
     def test_link_by_identifier_and_by_unique_name(self):
         tree = self.group()
@@ -288,7 +418,9 @@ class NodeActionTests(unittest.TestCase):
         tree = self.group()
         tree.links.valid = False
         self.accepted(action="addNode", treeKey="G", id="a", blIdname="ShaderNodeMath")
-        self.refused(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="a", toSocket="A")
+        self.accepted(action="addNode", treeKey="G", id="b", blIdname="ShaderNodeMath")
+        receipt = self.refused(action="linkSockets", treeKey="G", fromNode="a", fromSocket="Out", toNode="b", toSocket="A")
+        self.assertIn("not valid", receipt["message"])  # past the cycle check: Blender was asked and said no
         self.assertEqual(len(tree.links), 0)
 
     # addModifier / setModifierInput
