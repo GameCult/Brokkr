@@ -128,6 +128,15 @@ gets a `failed` receipt whose message names the rule):
   `color` (linear `[r, g, b]`, each 0 to 1), `lightType` (`POINT`, `SUN`, `SPOT`, `AREA`).
 - `setWorld`: optional `worldName` (default: the scene's world, created if there is
   none), `color` (`[r, g, b]`), `strength`. Edits the world's Background node.
+- `assignMaterial`: `targetObjectName` (an object with material slots, such as a mesh);
+  optional `materialName` (default `Brokkr Material`; an existing material of that name
+  is reused) and `color` (linear `[r, g, b]` or `[r, g, b, a]`, each a finite number 0
+  to 1; alpha defaults to 1). `color` sets the Principled BSDF Base Color (the node tree
+  is created if the material has none) and `diffuse_color`; a malformed `color` is
+  refused naming the field and nothing is created or changed (`"color": null` counts as absent). Without `color` an
+  existing material's colour is left as it is. Idempotent per (object, material): if the
+  object already has a slot with that material no second slot is added. Other keys are
+  ignored, as for every action.
 - `renderStill`: `outputPath` relative to the preference `Render Output Directory`,
   ending `.png`, `.jpg` or `.exr` (same containment rules as import); optional
   `engine` (any engine of the running Blender, case-insensitive), `resolutionX`,
