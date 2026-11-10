@@ -3,7 +3,7 @@
 Owner of how an intent becomes a node group, a node, a link or a modifier input on Blender 5.2.
 Validation is plain Python and runs before bpy is touched; apply steps that can still fail after
 Blender has been asked (an unknown node type, an enum that is not offered) undo what they made, so a
-refused intent leaves the tree as it was. Docs: docs/blender-node-graphs.md.
+refused intent leaves the tree as it was. Docs: docs/node-actions.md. The design is PR #3 (branch libby/blender-node-graphs-design).
 """
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ from .scene_actions import ActionRefused
 ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,63}")
 KEY_PATTERN = re.compile(r"[A-Za-z0-9 ._-]{1,63}")
 # A geometry tree may hold geometry, function and shader math nodes. Nodes that read or write files,
-# run code, write caches or nest groups are not part of this cut.
+# run code, write caches, nest groups or sample images are not part of this cut.
 NODE_IDNAME = re.compile(r"(GeometryNode|FunctionNode|ShaderNode)[A-Za-z0-9]+")
-NODE_DENIED = ("Import", "Export", "Script", "Bake", "Group", "Simulation", "Repeat", "Foreach", "Viewer", "TexImage", "TexEnvironment")
+NODE_DENIED = ("Import", "Export", "Script", "Bake", "Group", "Simulation", "Repeat", "Foreach", "Viewer", "TexImage", "TexEnvironment",
+               "ImageTexture", "InputImage", "TexIES")
 MAX_NODES = 500
 MAX_INTERFACE = 64
 MAX_MODIFIERS = 8
